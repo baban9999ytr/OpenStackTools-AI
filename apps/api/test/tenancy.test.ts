@@ -1,6 +1,7 @@
 import { before, after, test } from "node:test";
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
+import express from "express";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 import request from "supertest";
 
@@ -11,6 +12,7 @@ process.env.OPENAI_MODEL = "test-model";
 process.env.DASHBOARD_ORIGIN = "http://localhost:5173";
 let replset: MongoMemoryReplSet;
 const { createApp } = await import("../src/app.js");
+const { distributedLimit } = await import("../src/middleware/limits.js");
 const app = createApp(async () => ({
   text: "Test answer",
   inputTokens: 8,
@@ -295,4 +297,18 @@ test("staff role checks, login and logout", async () => {
     (await request(app).get("/api/auth/me").set("Cookie", viewerCookie)).status,
     401,
   );
+});
+
+test("rate limit is shared across API instances", async () => {
+  const first = express();
+  const second = express();
+  first.use(distributedLimit("shared-test", 2, 60_000));
+  second.use(distributedLimit("shared-test", 2, 60_000));
+  first.get("/", (_req, res) => res.sendStatus(204));
+  second.get("/", (_req, res) => res.sendStatus(204));
+  assert.equal((await request(first).get("/")).status, 204);
+  assert.equal((await request(second).get("/")).status, 204);
+  const blocked = await request(first).get("/");
+  assert.equal(blocked.status, 429);
+  assert.ok(blocked.headers["retry-after"]);
 });

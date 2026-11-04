@@ -179,3 +179,11 @@ const usageEventSchema = new Schema(
 );
 usageEventSchema.index({ organizationId: 1, createdAt: -1 });
 export const UsageEvent = mongoose.model("UsageEvent", usageEventSchema);
+
+const rateCounterSchema = new Schema({
+  key: { type: String, required: true, unique: true },
+  count: { type: Number, required: true, default: 0 },
+  expiresAt: { type: Date, required: true },
+});
+rateCounterSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+export const RateCounter = mongoose.model("RateCounter", rateCounterSchema);

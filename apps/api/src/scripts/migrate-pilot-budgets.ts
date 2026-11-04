@@ -13,10 +13,15 @@ try {
     { monthlyBudgetMicros: { $exists: false } },
     { $set: { monthlyBudgetMicros: env.defaultMonthlyBudgetMicros } },
   );
+  const retention = await Organization.updateMany(
+    { retentionDays: { $exists: false } },
+    { $set: { retentionDays: 30 } },
+  );
   logger.info(
     {
       dailyUpdated: daily.modifiedCount,
       monthlyUpdated: monthly.modifiedCount,
+      retentionUpdated: retention.modifiedCount,
     },
     "Pilot budget migration completed",
   );

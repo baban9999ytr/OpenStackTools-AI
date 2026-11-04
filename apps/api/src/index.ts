@@ -4,14 +4,17 @@ import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
 import { startWidgetWorker } from "./services/widget-queue.js";
 import { openAIResponder } from "./services/ai.js";
+import { startRetentionWorker } from "./services/retention.js";
 try {
   await mongoose.connect(env.mongoUrl);
   const stopWorker = startWidgetWorker(openAIResponder);
+  const stopRetention = startRetentionWorker();
   const server = createApp().listen(env.port, () =>
     logger.info({ port: env.port }, "API listening"),
   );
   const shutdown = () => {
     stopWorker();
+    stopRetention();
     server.close(async () => {
       await mongoose.disconnect();
       process.exit(0);

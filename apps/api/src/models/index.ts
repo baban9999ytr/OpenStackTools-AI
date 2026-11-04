@@ -23,6 +23,13 @@ const organizationSchema = new Schema(
     name: { type: String, required: true, trim: true },
     dailyBudgetMicros: { type: Number, required: true, min: 0 },
     monthlyBudgetMicros: { type: Number, required: true, min: 0 },
+    retentionDays: {
+      type: Number,
+      required: true,
+      default: 30,
+      min: 1,
+      max: 365,
+    },
   },
   options,
 );
@@ -301,3 +308,18 @@ const rateCounterSchema = new Schema({
 });
 rateCounterSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 export const RateCounter = mongoose.model("RateCounter", rateCounterSchema);
+
+const auditEventSchema = new Schema({
+  organizationId: {
+    type: Schema.Types.ObjectId,
+    ref: "Organization",
+    required: true,
+  },
+  actorId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  action: { type: String, required: true },
+  target: { type: String, required: true },
+  result: { type: Number, required: true },
+  createdAt: { type: Date, default: Date.now },
+});
+auditEventSchema.index({ organizationId: 1, createdAt: -1 });
+export const AuditEvent = mongoose.model("AuditEvent", auditEventSchema);

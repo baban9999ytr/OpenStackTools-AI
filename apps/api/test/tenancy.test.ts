@@ -27,8 +27,16 @@ const { distributedLimit } = await import("../src/middleware/limits.js");
 const { maximumReservationMicros } = await import("../src/services/budget.js");
 const { processPendingRequests } =
   await import("../src/services/widget-queue.js");
-const { WidgetRequest, Message, BudgetWindow, UsageEvent } =
-  await import("../src/models/index.js");
+const { runRetention } = await import("../src/services/retention.js");
+const {
+  WidgetRequest,
+  Message,
+  BudgetWindow,
+  UsageEvent,
+  Conversation,
+  Organization,
+  RateCounter,
+} = await import("../src/models/index.js");
 const app = createApp(async () => ({
   text: "Test answer",
   inputTokens: 8,
@@ -593,14 +601,128 @@ test("invitation is single use and password reset revokes sessions", async () =>
   );
   assert.equal(
     (
+      await request(app).post("/api/auth/login").set(dashboardHeaders).send({
+        email: "agent@example.test",
+        password: "new-secure-password-123",
+      })
+    ).status,
+    200,
+  );
+});
+
+test("owner export is tenant scoped and retention removes expired conversations", async () => {
+  const denied = await request(app)
+    .get(`/api/organizations/${orgA}/export/conversations`)
+    .set("Cookie", cookieB);
+  assert.equal(denied.status, 403);
+  const exported = await request(app)
+    .get(`/api/organizations/${orgA}/export/conversations`)
+    .set("Cookie", cookieA);
+  assert.equal(exported.status, 200);
+  assert.ok(
+    exported.body.items.every(
+      (item: { organizationId: string }) => item.organizationId === orgA,
+    ),
+  );
+  assert.equal(
+    (
       await request(app)
-        .post("/api/auth/login")
+        .patch(`/api/organizations/${orgA}/retention`)
         .set(dashboardHeaders)
+        .set("Cookie", cookieB)
+        .send({ days: 1 })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request(app)
+        .patch(`/api/organizations/${orgA}/retention`)
+        .set(dashboardHeaders)
+        .set("Cookie", cookieA)
+        .send({ days: 1 })
+    ).status,
+    200,
+  );
+  const old = await Conversation.create({
+    organizationId: orgA,
+    assistantId,
+    visitorId: "old-visitor",
+    updatedAt: new Date("2020-01-01"),
+  });
+  await Message.create({
+    organizationId: orgA,
+    conversationId: old._id,
+    role: "customer",
+    text: "Expired",
+  });
+  await Conversation.collection.updateOne(
+    { _id: old._id },
+    { $set: { updatedAt: new Date("2020-01-01") } },
+  );
+  await runRetention(new Date());
+  assert.equal(await Conversation.exists({ _id: old._id }), null);
+  assert.equal(await Message.countDocuments({ conversationId: old._id }), 0);
+});
+
+test("owner can delete only their own tenant with password confirmation", async () => {
+  await RateCounter.deleteMany({}); // Only the ephemeral test database; avoid unrelated auth requests reaching the shared test limit.
+  const created = await request(app)
+    .post("/api/auth/register")
+    .set(dashboardHeaders)
+    .send({
+      organizationName: "Temporary Pilot",
+      name: "Delete Owner",
+      email: "delete@example.test",
+      password: "delete-password-123",
+    });
+  assert.equal(created.status, 201);
+  const verified = await request(app)
+    .post("/api/auth/verify-email")
+    .set(dashboardHeaders)
+    .send({ token: mailed.get("delete@example.test") });
+  const orgId = created.body.organization.id;
+  const cookie = cookieFrom(verified);
+  const route = `/api/organizations/${orgId}/tenant`;
+  assert.equal(
+    (
+      await request(app)
+        .delete(route)
+        .set(dashboardHeaders)
+        .set("Cookie", cookie)
         .send({
-          email: "agent@example.test",
-          password: "new-secure-password-123",
+          organizationName: "Temporary Pilot",
+          password: "wrong-password",
+        })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request(app)
+        .delete(route)
+        .set(dashboardHeaders)
+        .set("Cookie", cookieB)
+        .send({
+          organizationName: "Temporary Pilot",
+          password: "delete-password-123",
+        })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request(app)
+        .delete(route)
+        .set(dashboardHeaders)
+        .set("Cookie", cookie)
+        .send({
+          organizationName: "Temporary Pilot",
+          password: "delete-password-123",
         })
     ).status,
     200,
   );
+  assert.equal(await Organization.exists({ _id: orgId }), null);
+  assert.ok(await Organization.exists({ _id: orgA }));
 });

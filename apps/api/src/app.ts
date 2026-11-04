@@ -15,6 +15,8 @@ import { requireDashboardOrigin } from "./middleware/security.js";
 import { openAIResponder, type AIResponder } from "./services/ai.js";
 import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
+import { auditStaffMutation } from "./middleware/audit.js";
+import operationsRoutes from "./routes/operations.js";
 
 export const createApp = (respond: AIResponder = openAIResponder) => {
   const app = express();
@@ -69,7 +71,9 @@ export const createApp = (respond: AIResponder = openAIResponder) => {
     "/api/organizations",
     dashboardCors,
     requireDashboardOrigin,
+    auditStaffMutation,
     organizationRoutes,
+    operationsRoutes,
     assistantRoutes,
     conversationRoutes,
   );

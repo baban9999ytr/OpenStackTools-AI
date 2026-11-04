@@ -5,6 +5,8 @@
   "workspaces": ["apps/api", "apps/web"],
   "engines": { "node": ">=22 <25" },
   "scripts": {
+    "brand:generate": "node brand/generate-css.mjs",
+    "brand:check": "node brand/generate-css.mjs --check",
     "dev:api": "npm run dev -w apps/api",
     "dev:web": "npm run dev -w apps/web",
     "build": "npm run build -w apps/api && npm run build -w apps/web",

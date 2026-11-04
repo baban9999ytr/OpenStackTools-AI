@@ -111,14 +111,29 @@ router.get(
       .sort({ createdAt: -1 })
       .limit(100)
       .lean();
-    const totals = events.reduce(
-      (acc, event) => ({
-        inputTokens: acc.inputTokens + event.inputTokens,
-        outputTokens: acc.outputTokens + event.outputTokens,
-      }),
-      { inputTokens: 0, outputTokens: 0 },
-    );
-    res.json({ totals, recentEvents: events });
+    const [totals] = await UsageEvent.aggregate<{
+      inputTokens: number;
+      outputTokens: number;
+      estimatedCostMicros: number;
+    }>([
+      { $match: { organizationId: res.locals.organizationId } },
+      {
+        $group: {
+          _id: null,
+          inputTokens: { $sum: "$inputTokens" },
+          outputTokens: { $sum: "$outputTokens" },
+          estimatedCostMicros: { $sum: "$estimatedCostMicros" },
+        },
+      },
+    ]);
+    res.json({
+      totals: totals ?? {
+        inputTokens: 0,
+        outputTokens: 0,
+        estimatedCostMicros: 0,
+      },
+      recentEvents: events,
+    });
   },
 );
 export default router;

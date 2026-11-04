@@ -11,6 +11,7 @@ import {
   requireUser,
 } from "../middleware/security.js";
 import { newToken, tokenHash } from "../services/tokens.js";
+import { env } from "../config/env.js";
 
 const router = Router();
 const registerInput = z.strictObject({
@@ -51,7 +52,13 @@ router.post(
           { session: dbSession },
         );
         const [organization] = await Organization.create(
-          [{ name: organizationName }],
+          [
+            {
+              name: organizationName,
+              dailyBudgetMicros: env.defaultDailyBudgetMicros,
+              monthlyBudgetMicros: env.defaultMonthlyBudgetMicros,
+            },
+          ],
           { session: dbSession },
         );
         if (!user || !organization) throw new Error("Registration failed");
@@ -73,16 +80,14 @@ router.post(
     }
     if (!userId || !organizationId) throw new Error("Registration failed");
     await issueSession(res, userId);
-    res
-      .status(201)
-      .json({
-        user: { id: userId, name, email },
-        organization: {
-          id: organizationId,
-          name: organizationName,
-          role: "owner",
-        },
-      });
+    res.status(201).json({
+      user: { id: userId, name, email },
+      organization: {
+        id: organizationId,
+        name: organizationName,
+        role: "owner",
+      },
+    });
   },
 );
 router.post("/login", authLimit, validate(loginInput), async (req, res) => {

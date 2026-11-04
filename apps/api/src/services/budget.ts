@@ -1,0 +1,167 @@
+import mongoose from "mongoose";
+import { BudgetWindow, Organization, WidgetRequest } from "../models/index.js";
+import { env } from "../config/env.js";
+import { MAX_COMPLETION_TOKENS, type Turn } from "./ai.js";
+import { costMicros } from "./money.js";
+
+export class BudgetExceeded extends Error {
+  constructor() {
+    super("Organization AI budget exhausted");
+  }
+}
+export const utcPeriods = (now = new Date()) => ({
+  day: new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  ),
+  month: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
+});
+export const measuredCostMicros = (inputTokens: number, outputTokens: number) =>
+  costMicros(inputTokens, env.inputPriceMicrosPerMillion) +
+  costMicros(outputTokens, env.outputPriceMicrosPerMillion);
+
+// Deliberately conservative: byte count is multiplied before adding a fixed
+// allowance for message framing. Actual provider usage is reconciled afterward.
+export const maximumReservationMicros = (
+  instructions: string,
+  history: Turn[],
+) => {
+  const bytes =
+    Buffer.byteLength(instructions) +
+    history.reduce((sum, turn) => sum + Buffer.byteLength(turn.text), 0);
+  const upperInputTokens = bytes * 4 + 4096;
+  if (!Number.isSafeInteger(upperInputTokens))
+    throw new Error("Context too large");
+  return measuredCostMicros(upperInputTokens, MAX_COMPLETION_TOKENS);
+};
+
+const ensureWindow = async (
+  organizationId: mongoose.Types.ObjectId,
+  kind: "day" | "month",
+  periodStart: Date,
+  limitMicros: number,
+) => {
+  try {
+    await BudgetWindow.updateOne(
+      { organizationId, kind, periodStart },
+      { $setOnInsert: { spentMicros: 0, reservedMicros: 0, limitMicros } },
+      { upsert: true },
+    );
+  } catch (error) {
+    if ((error as { code?: number }).code !== 11000) throw error;
+  }
+};
+
+export const reserveBudget = async (
+  requestId: mongoose.Types.ObjectId,
+  amount: number,
+) => {
+  const request = await WidgetRequest.findById(requestId).lean();
+  if (!request || request.status !== "processing") return false;
+  const organization = await Organization.findById(
+    request.organizationId,
+  ).lean();
+  if (
+    !organization ||
+    !Number.isSafeInteger(organization.dailyBudgetMicros) ||
+    !Number.isSafeInteger(organization.monthlyBudgetMicros)
+  ) {
+    throw new Error(
+      "Organization budget is not configured; run the pilot migration",
+    );
+  }
+  const periods = utcPeriods();
+  await ensureWindow(
+    request.organizationId,
+    "day",
+    periods.day,
+    organization.dailyBudgetMicros,
+  );
+  await ensureWindow(
+    request.organizationId,
+    "month",
+    periods.month,
+    organization.monthlyBudgetMicros,
+  );
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const fresh = await WidgetRequest.findOne({
+        _id: requestId,
+        status: "processing",
+        reservedMicros: 0,
+      }).session(session);
+      if (!fresh) throw new Error("Request lease was lost");
+      for (const [kind, periodStart, limitMicros] of [
+        ["day", periods.day, organization.dailyBudgetMicros],
+        ["month", periods.month, organization.monthlyBudgetMicros],
+      ] as const) {
+        const updated = await BudgetWindow.findOneAndUpdate(
+          {
+            organizationId: request.organizationId,
+            kind,
+            periodStart,
+            $expr: {
+              $lte: [
+                { $add: ["$spentMicros", "$reservedMicros", amount] },
+                limitMicros,
+              ],
+            },
+          },
+          { $inc: { reservedMicros: amount }, $set: { limitMicros } },
+          { session, returnDocument: "after" },
+        );
+        if (!updated) throw new BudgetExceeded();
+      }
+      await WidgetRequest.updateOne(
+        { _id: requestId, status: "processing" },
+        {
+          $set: {
+            reservedMicros: amount,
+            reservedDay: periods.day,
+            reservedMonth: periods.month,
+          },
+        },
+        { session },
+      );
+    });
+    return true;
+  } finally {
+    await session.endSession();
+  }
+};
+
+export const settleWindows = async (
+  request: {
+    organizationId: mongoose.Types.ObjectId;
+    reservedMicros: number;
+    reservedDay?: Date | null;
+    reservedMonth?: Date | null;
+  },
+  actualMicros: number,
+  session: mongoose.ClientSession,
+) => {
+  if (!request.reservedMicros || !request.reservedDay || !request.reservedMonth)
+    return;
+  for (const [kind, periodStart] of [
+    ["day", request.reservedDay],
+    ["month", request.reservedMonth],
+  ] as const) {
+    const result = await BudgetWindow.updateOne(
+      {
+        organizationId: request.organizationId,
+        kind,
+        periodStart,
+        reservedMicros: { $gte: request.reservedMicros },
+      },
+      {
+        $inc: {
+          reservedMicros: -request.reservedMicros,
+          spentMicros: actualMicros,
+        },
+      },
+      { session },
+    );
+    if (result.modifiedCount !== 1)
+      throw new Error("Budget reservation missing");
+  }
+};

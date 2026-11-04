@@ -5,15 +5,21 @@ import {
   Assistant,
   Conversation,
   Message,
-  UsageEvent,
+  WidgetRequest,
   WidgetSession,
 } from "../models/index.js";
 import { validate } from "../middleware/validate.js";
 import { requireWidgetSession } from "../middleware/security.js";
 import { widgetLimit } from "../middleware/limits.js";
 import { newToken, tokenHash } from "../services/tokens.js";
-import type { AIResponder, Turn } from "../services/ai.js";
-import { env } from "../config/env.js";
+import type { AIResponder } from "../services/ai.js";
+import {
+  enqueueWidgetMessage,
+  processWidgetRequest,
+  WidgetConflict,
+  WidgetNotFound,
+} from "../services/widget-queue.js";
+
 export const widgetRoutes = (respond: AIResponder) => {
   const router = Router();
   router.use(widgetLimit);
@@ -39,17 +45,37 @@ export const widgetRoutes = (respond: AIResponder) => {
       }
       const token = newToken();
       const visitorId = newToken();
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
       await WidgetSession.create({
         tokenHash: tokenHash(token),
         organizationId: assistant.organizationId,
         assistantId: assistant._id,
         visitorId,
         origin,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        expiresAt,
       });
-      res.status(201).json({ token, assistant: { name: assistant.name } });
+      res
+        .status(201)
+        .json({ token, expiresAt, assistant: { name: assistant.name } });
     },
   );
+  router.get("/sessions/current", requireWidgetSession, async (_req, res) => {
+    const session = res.locals.widgetSession;
+    const assistant = await Assistant.findOne({
+      _id: session.assistantId,
+      organizationId: session.organizationId,
+      active: true,
+    }).lean();
+    if (!assistant) {
+      res.status(404).json({ error: "Assistant unavailable" });
+      return;
+    }
+    res.json({
+      assistant: { name: assistant.name },
+      conversationId: session.currentConversationId,
+      expiresAt: session.expiresAt,
+    });
+  });
   router.get(
     "/conversations/:conversationId/messages",
     requireWidgetSession,
@@ -73,12 +99,49 @@ export const widgetRoutes = (respond: AIResponder) => {
         organizationId: session.organizationId,
         conversationId: conversation._id,
       })
-        .sort({ createdAt: 1 })
+        .sort({ createdAt: 1, _id: 1 })
         .limit(100)
         .lean();
       res.json({ conversation, messages });
     },
   );
+  const responseFor = async (request: typeof WidgetRequest.prototype) => {
+    const [message, reply] = await Promise.all([
+      Message.findOne({ requestId: request._id, role: "customer" }).lean(),
+      request.responseMessageId
+        ? Message.findOne({
+            _id: request.responseMessageId,
+            organizationId: request.organizationId,
+          }).lean()
+        : Promise.resolve(null),
+    ]);
+    return {
+      requestId: request._id,
+      conversationId: request.conversationId,
+      status: request.status,
+      message,
+      reply,
+      errorCode: request.errorCode,
+    };
+  };
+  router.get("/requests/:requestId", requireWidgetSession, async (req, res) => {
+    if (!isValidObjectId(req.params.requestId)) {
+      res.status(400).json({ error: "Invalid request" });
+      return;
+    }
+    const session = res.locals.widgetSession;
+    const found = await WidgetRequest.findOne({
+      _id: req.params.requestId,
+      organizationId: session.organizationId,
+      assistantId: session.assistantId,
+      visitorId: session.visitorId,
+    });
+    if (!found) {
+      res.status(404).json({ error: "Request unavailable" });
+      return;
+    }
+    res.json(await responseFor(found));
+  });
   router.post(
     "/messages",
     requireWidgetSession,
@@ -91,6 +154,13 @@ export const widgetRoutes = (respond: AIResponder) => {
     ),
     async (req, res) => {
       const session = res.locals.widgetSession;
+      if (
+        req.body.conversationId &&
+        !isValidObjectId(req.body.conversationId)
+      ) {
+        res.status(400).json({ error: "Invalid conversation" });
+        return;
+      }
       const assistant = await Assistant.findOne({
         _id: session.assistantId,
         organizationId: session.organizationId,
@@ -100,114 +170,44 @@ export const widgetRoutes = (respond: AIResponder) => {
         res.status(404).json({ error: "Assistant unavailable" });
         return;
       }
-      let conversation;
-      if (req.body.conversationId) {
-        if (!isValidObjectId(req.body.conversationId)) {
-          res.status(400).json({ error: "Invalid conversation" });
-          return;
-        }
-        conversation = await Conversation.findOne({
-          _id: req.body.conversationId,
-          organizationId: session.organizationId,
-          assistantId: session.assistantId,
-          visitorId: session.visitorId,
-        });
-        if (!conversation) {
-          res.status(404).json({ error: "Conversation unavailable" });
-          return;
-        }
-      } else {
-        conversation = await Conversation.create({
-          organizationId: session.organizationId,
-          assistantId: session.assistantId,
-          visitorId: session.visitorId,
-        });
-      }
-      if (conversation.status === "closed") {
-        res.status(409).json({ error: "Conversation is closed" });
-        return;
-      }
-      const existing = await Message.findOne({
-        organizationId: session.organizationId,
-        conversationId: conversation._id,
-        clientMessageId: req.body.clientMessageId,
-      });
-      if (existing) {
-        res
-          .status(200)
-          .json({ conversationId: conversation._id, duplicate: true });
-        return;
-      }
-      const customerMessage = await Message.create({
-        organizationId: session.organizationId,
-        conversationId: conversation._id,
-        role: "customer",
-        text: req.body.text,
-        clientMessageId: req.body.clientMessageId,
-      });
-      await Conversation.updateOne(
-        { _id: conversation._id, organizationId: session.organizationId },
-        { $set: { updatedAt: new Date() } },
-      );
-      if (conversation.status !== "bot") {
-        res
-          .status(202)
-          .json({
-            conversationId: conversation._id,
-            message: customerMessage,
-            status: conversation.status,
-          });
-        return;
-      }
-      const prior = await Message.find({
-        organizationId: session.organizationId,
-        conversationId: conversation._id,
-        _id: { $ne: customerMessage._id },
-      })
-        .sort({ createdAt: -1 })
-        .limit(12)
-        .lean();
-      const history: Turn[] = [
-        ...prior
-          .reverse()
-          .map((item) => ({
-            role: item.role as Turn["role"],
-            text: item.text,
-          })),
-        { role: "customer", text: req.body.text },
-      ];
       try {
-        const answer = await respond(assistant.instructions, history);
-        const reply = await Message.create({
-          organizationId: session.organizationId,
-          conversationId: conversation._id,
-          role: "assistant",
-          text: answer.text,
-        });
-        await UsageEvent.create({
-          organizationId: session.organizationId,
-          assistantId: assistant._id,
-          conversationId: conversation._id,
-          model: env.openaiModel,
-          inputTokens: answer.inputTokens,
-          outputTokens: answer.outputTokens,
-        });
-        res
-          .status(201)
-          .json({
-            conversationId: conversation._id,
-            message: customerMessage,
-            reply,
-            status: "bot",
-          });
+        const queued = await enqueueWidgetMessage(session, req.body);
+        if (queued.status === "queued")
+          await processWidgetRequest(queued._id, respond);
+        const current = await WidgetRequest.findById(queued._id);
+        if (!current) throw new Error("Queued request missing");
+        if (current.errorCode === "budget_exhausted") {
+          res
+            .status(402)
+            .json({
+              error: "Organization AI budget exhausted",
+              requestId: current._id,
+              conversationId: current.conversationId,
+            });
+          return;
+        }
+        if (current.status === "failed") {
+          res
+            .status(502)
+            .json({
+              error: "Assistant temporarily unavailable",
+              requestId: current._id,
+              conversationId: current.conversationId,
+            });
+          return;
+        }
+        const payload = await responseFor(current);
+        res.status(current.status === "completed" ? 201 : 202).json(payload);
       } catch (error) {
-        req.log.error({ err: error }, "AI response failed");
-        res
-          .status(502)
-          .json({
-            error: "Assistant temporarily unavailable",
-            conversationId: conversation._id,
-          });
+        if (error instanceof WidgetConflict) {
+          res.status(409).json({ error: error.message });
+          return;
+        }
+        if (error instanceof WidgetNotFound) {
+          res.status(404).json({ error: error.message });
+          return;
+        }
+        throw error;
       }
     },
   );

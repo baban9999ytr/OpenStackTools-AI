@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { env } from "../config/env.js";
+export const MAX_COMPLETION_TOKENS = 800;
 export type Turn = { role: "customer" | "assistant" | "agent"; text: string };
 export type AIReply = {
   text: string;
@@ -28,13 +29,14 @@ export const openAIResponder: AIResponder = async (instructions, history) => {
         content: turn.text,
       })),
     ],
-    max_completion_tokens: 800,
+    max_completion_tokens: MAX_COMPLETION_TOKENS,
   });
   const text = response.choices[0]?.message.content;
   if (!text) throw new Error("Empty AI response");
+  if (!response.usage) throw new Error("AI response omitted usage");
   return {
     text,
-    inputTokens: response.usage?.prompt_tokens ?? 0,
-    outputTokens: response.usage?.completion_tokens ?? 0,
+    inputTokens: response.usage.prompt_tokens,
+    outputTokens: response.usage.completion_tokens,
   };
 };

@@ -9,10 +9,19 @@ process.env.MONGODB_URL = "mongodb://127.0.0.1:27017/placeholder";
 process.env.SESSION_SECRET = "test-only-secret-at-least-32-characters-long";
 process.env.OPENAI_API_KEY = "test-only-key";
 process.env.OPENAI_MODEL = "test-model";
+process.env.DEFAULT_DAILY_BUDGET_USD = "1";
+process.env.DEFAULT_MONTHLY_BUDGET_USD = "10";
+process.env.OPENAI_INPUT_USD_PER_MILLION_TOKENS = "1";
+process.env.OPENAI_OUTPUT_USD_PER_MILLION_TOKENS = "1";
 process.env.DASHBOARD_ORIGIN = "http://localhost:5173";
 let replset: MongoMemoryReplSet;
 const { createApp } = await import("../src/app.js");
 const { distributedLimit } = await import("../src/middleware/limits.js");
+const { maximumReservationMicros } = await import("../src/services/budget.js");
+const { processPendingRequests } =
+  await import("../src/services/widget-queue.js");
+const { WidgetRequest, Message, BudgetWindow, UsageEvent } =
+  await import("../src/models/index.js");
 const app = createApp(async () => ({
   text: "Test answer",
   inputTokens: 8,
@@ -311,4 +320,172 @@ test("rate limit is shared across API instances", async () => {
   const blocked = await request(first).get("/");
   assert.equal(blocked.status, 429);
   assert.ok(blocked.headers["retry-after"]);
+});
+
+test("daily and monthly budgets reject concurrent AI requests across visitors", async () => {
+  const instructions = "Answer Beta Shop customers accurately and briefly.";
+  const assistant = await request(app)
+    .post(`/api/organizations/${orgB}/assistants`)
+    .set(dashboardHeaders)
+    .set("Cookie", cookieB)
+    .send({
+      name: "Beta Helper",
+      instructions,
+      allowedOrigins: [websiteOrigin],
+    });
+  assert.equal(assistant.status, 201);
+  const text = "Budget guarded request";
+  const reserve = maximumReservationMicros(instructions, [
+    { role: "customer", text },
+  ]);
+  const dollars = (reserve / 1_000_000).toFixed(6);
+  const configured = await request(app)
+    .patch(`/api/organizations/${orgB}/budgets`)
+    .set(dashboardHeaders)
+    .set("Cookie", cookieB)
+    .send({ dailyUsd: dollars, monthlyUsd: dollars });
+  assert.equal(configured.status, 200);
+  assert.equal(
+    (
+      await request(app)
+        .patch(`/api/organizations/${orgB}/budgets`)
+        .set(dashboardHeaders)
+        .set("Cookie", cookieA)
+        .send({ dailyUsd: "10", monthlyUsd: "10" })
+    ).status,
+    403,
+  );
+  const [firstSession, secondSession] = await Promise.all(
+    [1, 2].map(() =>
+      request(app)
+        .post("/api/widget/sessions")
+        .set(websiteHeaders)
+        .send({ publicKey: assistant.body.assistant.publicKey }),
+    ),
+  );
+  let calls = 0;
+  const slowResponder = async () => {
+    calls++;
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    return { text: "Allowed", inputTokens: 8, outputTokens: 3 };
+  };
+  const slowApp = createApp(slowResponder);
+  const replies = await Promise.all(
+    [firstSession, secondSession].map((started) =>
+      request(slowApp)
+        .post("/api/widget/messages")
+        .set(websiteHeaders)
+        .set("Authorization", `Bearer ${started.body.token}`)
+        .send({ text, clientMessageId: crypto.randomUUID() }),
+    ),
+  );
+  assert.deepEqual(replies.map((reply) => reply.status).sort(), [201, 402]);
+  assert.equal(calls, 1);
+  const windows = await BudgetWindow.find({ organizationId: orgB });
+  assert.equal(windows.length, 2);
+  assert.ok(
+    windows.every(
+      (window) =>
+        window.spentMicros <= window.limitMicros && window.reservedMicros === 0,
+    ),
+  );
+  assert.equal(
+    await UsageEvent.countDocuments({
+      organizationId: orgB,
+      billingStatus: "measured",
+    }),
+    1,
+  );
+});
+
+test("first-message idempotency and serialized replies survive concurrent POSTs", async () => {
+  const started = await request(app)
+    .post("/api/widget/sessions")
+    .set(websiteHeaders)
+    .send({ publicKey });
+  const token = started.body.token as string;
+  let calls = 0;
+  const slowResponder = async () => {
+    calls++;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    return { text: `Reply ${calls}`, inputTokens: 8, outputTokens: 3 };
+  };
+  const slowApp = createApp(slowResponder);
+  const clientMessageId = crypto.randomUUID();
+  const submit = () =>
+    request(slowApp)
+      .post("/api/widget/messages")
+      .set(websiteHeaders)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ text: "First question", clientMessageId });
+  const [a, b] = await Promise.all([submit(), submit()]);
+  assert.ok([201, 202].includes(a.status));
+  assert.ok([201, 202].includes(b.status));
+  const queued = await WidgetRequest.findOne({ clientMessageId });
+  assert.ok(queued);
+  assert.equal(await WidgetRequest.countDocuments({ clientMessageId }), 1);
+  assert.equal(await Message.countDocuments({ requestId: queued._id }), 2);
+  assert.equal(calls, 1);
+  const conversationId = queued.conversationId.toString();
+  const next = (text: string) =>
+    request(slowApp)
+      .post("/api/widget/messages")
+      .set(websiteHeaders)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ text, conversationId, clientMessageId: crypto.randomUUID() });
+  const [c, d] = await Promise.all([
+    next("Second question"),
+    next("Third question"),
+  ]);
+  assert.ok([201, 202].includes(c.status));
+  assert.ok([201, 202].includes(d.status));
+  await processPendingRequests(slowResponder);
+  const messages = await Message.find({ conversationId })
+    .sort({ createdAt: 1, _id: 1 })
+    .lean();
+  assert.deepEqual(
+    messages.map((message) => message.role),
+    ["customer", "assistant", "customer", "assistant", "customer", "assistant"],
+  );
+  assert.equal(calls, 3);
+});
+
+test("failed provider attempt is conservatively charged and retried once", async () => {
+  const started = await request(app)
+    .post("/api/widget/sessions")
+    .set(websiteHeaders)
+    .send({ publicKey });
+  let attempts = 0;
+  const responder = async () => {
+    attempts++;
+    if (attempts === 1) throw new Error("provider timeout");
+    return { text: "Recovered", inputTokens: 8, outputTokens: 3 };
+  };
+  const retryApp = createApp(responder);
+  const clientMessageId = crypto.randomUUID();
+  const first = await request(retryApp)
+    .post("/api/widget/messages")
+    .set(websiteHeaders)
+    .set("Authorization", `Bearer ${started.body.token}`)
+    .send({ text: "Retry me", clientMessageId });
+  assert.equal(first.status, 202);
+  await processPendingRequests(responder);
+  const queued = await WidgetRequest.findOne({ clientMessageId });
+  assert.equal(queued?.status, "completed");
+  assert.equal(attempts, 2);
+  assert.equal(await Message.countDocuments({ requestId: queued?._id }), 2);
+  assert.equal(
+    await UsageEvent.countDocuments({
+      requestId: queued?._id,
+      billingStatus: "uncertain",
+    }),
+    1,
+  );
+  assert.equal(
+    await UsageEvent.countDocuments({
+      requestId: queued?._id,
+      billingStatus: "measured",
+    }),
+    1,
+  );
 });

@@ -1,3 +1,4 @@
+import { parseUsdMicros } from "../services/money.js";
 import "dotenv/config";
 const must = (key: string): string => {
   const value = process.env[key]?.trim();
@@ -12,6 +13,16 @@ export const env = {
   sessionSecret: must("SESSION_SECRET"),
   openaiApiKey: must("OPENAI_API_KEY"),
   openaiModel: must("OPENAI_MODEL"),
+  defaultDailyBudgetMicros: parseUsdMicros(must("DEFAULT_DAILY_BUDGET_USD")),
+  defaultMonthlyBudgetMicros: parseUsdMicros(
+    must("DEFAULT_MONTHLY_BUDGET_USD"),
+  ),
+  inputPriceMicrosPerMillion: parseUsdMicros(
+    must("OPENAI_INPUT_USD_PER_MILLION_TOKENS"),
+  ),
+  outputPriceMicrosPerMillion: parseUsdMicros(
+    must("OPENAI_OUTPUT_USD_PER_MILLION_TOKENS"),
+  ),
   cookieSecure:
     process.env.COOKIE_SECURE === "true" ||
     process.env.NODE_ENV === "production",
@@ -25,3 +36,8 @@ if (!Number.isInteger(env.trustProxy) || env.trustProxy < 0)
   throw new Error("Invalid TRUST_PROXY");
 if (new URL(env.dashboardOrigin).origin !== env.dashboardOrigin)
   throw new Error("DASHBOARD_ORIGIN must be an origin");
+
+if (env.defaultMonthlyBudgetMicros < env.defaultDailyBudgetMicros)
+  throw new Error("Monthly budget must be at least the daily budget");
+if (!env.inputPriceMicrosPerMillion || !env.outputPriceMicrosPerMillion)
+  throw new Error("AI prices must be positive");

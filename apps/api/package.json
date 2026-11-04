@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "migrate:budgets": "tsx src/scripts/migrate-pilot-budgets.ts"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

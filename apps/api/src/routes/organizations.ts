@@ -5,6 +5,9 @@ import { z } from "zod";
 import { Membership, Organization, User } from "../models/index.js";
 import { validate, email, password } from "../middleware/validate.js";
 import { requireMembership, requireUser } from "../middleware/security.js";
+import { parseUsdMicros } from "../services/money.js";
+import { BudgetWindow } from "../models/index.js";
+import { utcPeriods } from "../services/budget.js";
 const router = Router();
 router.use(requireUser);
 const staffInput = z.strictObject({
@@ -33,6 +36,62 @@ router.get(
           email: users.find((user) => user._id.equals(item.userId))?.email,
         },
       })),
+    });
+  },
+);
+router.get(
+  "/:organizationId/budgets",
+  requireMembership(["owner", "admin"]),
+  async (_req, res) => {
+    const organization = await Organization.findById(
+      res.locals.organizationId,
+    ).lean();
+    if (!organization) {
+      res.status(404).json({ error: "Organization unavailable" });
+      return;
+    }
+    const periods = utcPeriods();
+    const windows = await BudgetWindow.find({
+      organizationId: res.locals.organizationId,
+      $or: [
+        { kind: "day", periodStart: periods.day },
+        { kind: "month", periodStart: periods.month },
+      ],
+    }).lean();
+    res.json({
+      dailyLimitMicros: organization.dailyBudgetMicros,
+      monthlyLimitMicros: organization.monthlyBudgetMicros,
+      windows,
+    });
+  },
+);
+router.patch(
+  "/:organizationId/budgets",
+  requireMembership(["owner"]),
+  validate(z.strictObject({ dailyUsd: z.string(), monthlyUsd: z.string() })),
+  async (req, res) => {
+    let dailyBudgetMicros: number;
+    let monthlyBudgetMicros: number;
+    try {
+      dailyBudgetMicros = parseUsdMicros(req.body.dailyUsd);
+      monthlyBudgetMicros = parseUsdMicros(req.body.monthlyUsd);
+    } catch {
+      res.status(422).json({ error: "Invalid budget amount" });
+      return;
+    }
+    if (monthlyBudgetMicros < dailyBudgetMicros) {
+      res
+        .status(422)
+        .json({ error: "Monthly budget must be at least the daily budget" });
+      return;
+    }
+    await Organization.updateOne(
+      { _id: res.locals.organizationId },
+      { $set: { dailyBudgetMicros, monthlyBudgetMicros } },
+    );
+    res.json({
+      dailyLimitMicros: dailyBudgetMicros,
+      monthlyLimitMicros: monthlyBudgetMicros,
     });
   },
 );

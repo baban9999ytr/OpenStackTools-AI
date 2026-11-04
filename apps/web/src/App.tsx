@@ -6,6 +6,8 @@ import {
   type Message,
   type Organization,
 } from "./api";
+import { usePreferences } from "./preferences";
+import { Wordmark } from "./Wordmark";
 
 type Account = { id: string; name: string; email: string };
 type Me = { user: Account; organizations: Organization[] };
@@ -13,6 +15,7 @@ const getError = (error: unknown) =>
   error instanceof Error ? error.message : "Something went wrong";
 
 function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
+  const { t, locale, setLocale, theme, setTheme } = usePreferences();
   const link = new URLSearchParams(window.location.hash.slice(1));
   const [mode, setMode] = useState<
     "login" | "register" | "verify" | "reset" | "invite" | "forgot"
@@ -56,8 +59,8 @@ function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
       if (mode === "register" || mode === "forgot") {
         setNotice(
           mode === "register"
-            ? "Check your email to verify your account."
-            : "If that account exists, a reset link has been sent.",
+            ? t("Check your email to verify your account.")
+            : t("If that account exists, a reset link has been sent."),
         );
         setMode("login");
       } else {
@@ -65,7 +68,7 @@ function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
         onSuccess();
       }
     } catch (error) {
-      setError(getError(error));
+      setError(t(getError(error)));
     } finally {
       setBusy(false);
     }
@@ -73,46 +76,47 @@ function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
   return (
     <main className="auth-layout">
       <section className="brand-panel">
-        <span className="eyebrow">OpenStackTools AI</span>
-        <h1>One place for your business conversations.</h1>
-        <p>
-          Create assistants, guide their responses, and step in when a person is
-          needed.
-        </p>
-        <div className="brand-mark" aria-hidden="true">
-          <span />
-          <span />
-          <span />
+        <Wordmark />
+        <div className="brand-intro">
+          <h1>{t("One place for your business conversations.")}</h1>
+          <p>
+            {t(
+              "Create assistants, guide their responses, and step in when a person is needed.",
+            )}
+          </p>
         </div>
+        <a className="brand-back" href="https://openstacktool.com/">
+          ← OpenStackTools
+        </a>
       </section>
       <section className="auth-panel">
         <div className="card auth-card">
           <h2>
             {mode === "login"
-              ? "Welcome back"
+              ? t("Welcome back")
               : mode === "register"
-                ? "Create your workspace"
+                ? t("Create your workspace")
                 : mode === "forgot"
-                  ? "Reset your password"
+                  ? t("Reset your password")
                   : mode === "verify"
-                    ? "Verify your email"
+                    ? t("Verify your email")
                     : mode === "invite"
-                      ? "Accept invitation"
-                      : "Choose a new password"}
+                      ? t("Accept invitation")
+                      : t("Choose a new password")}
           </h2>
           <p className="muted">
             {mode === "login"
-              ? "Sign in to your business dashboard."
+              ? t("Sign in to your business dashboard.")
               : mode === "register"
-                ? "Start with an organization and an owner account."
-                : "Complete this secure account step."}
+                ? t("Start with an organization and an owner account.")
+                : t("Complete this secure account step.")}
           </p>
           <form onSubmit={submit}>
             {(mode === "register" || mode === "invite") && (
               <>
                 {mode === "register" && (
                   <label>
-                    Organization name
+                    {t("Organization name")}
                     <input
                       name="organizationName"
                       minLength={2}
@@ -123,7 +127,7 @@ function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
                   </label>
                 )}
                 <label>
-                  Your name
+                  {t("Your name")}
                   <input
                     name="name"
                     required
@@ -135,7 +139,7 @@ function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
             )}
             {(mode === "login" || mode === "register" || mode === "forgot") && (
               <label>
-                Email
+                {t("Email")}
                 <input
                   name="email"
                   type="email"
@@ -149,7 +153,7 @@ function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
               mode === "reset" ||
               mode === "invite") && (
               <label>
-                Password
+                {t("Password")}
                 <input
                   name="password"
                   type="password"
@@ -169,14 +173,14 @@ function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
             )}
             <button disabled={busy} type="submit">
               {busy
-                ? "Please wait…"
+                ? t("Please wait…")
                 : mode === "login"
-                  ? "Sign in"
+                  ? t("Sign in")
                   : mode === "register"
-                    ? "Create workspace"
+                    ? t("Create workspace")
                     : mode === "forgot"
-                      ? "Send reset link"
-                      : "Continue"}
+                      ? t("Send reset link")
+                      : t("Continue")}
             </button>
           </form>
           {(mode === "login" || mode === "register") && (
@@ -188,15 +192,31 @@ function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
               }}
             >
               {mode === "login"
-                ? "Create an account"
-                : "Already have an account? Sign in"}
+                ? t("Create an account")
+                : t("Already have an account? Sign in")}
             </button>
           )}
           {mode === "login" && (
             <button className="text-button" onClick={() => setMode("forgot")}>
-              Forgot password?
+              {t("Forgot password?")}
             </button>
           )}
+          <div className="auth-preferences" aria-label="Display preferences">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setLocale(locale === "en" ? "tr" : "en")}
+            >
+              {locale === "en" ? "TR" : "EN"}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+            >
+              {t(theme === "light" ? "Dark" : "Light")}
+            </button>
+          </div>
         </div>
       </section>
     </main>
@@ -204,6 +224,8 @@ function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
 }
 
 function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
+  const { t, locale, setLocale, theme, setTheme } = usePreferences();
+  const [navOpen, setNavOpen] = useState(false);
   const [organizationId, setOrganizationId] = useState(
     me.organizations[0]?.id ?? "",
   );
@@ -270,7 +292,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
       setConversations(c.conversations);
       setError("");
     } catch (error) {
-      setError(getError(error));
+      setError(t(getError(error)));
     }
   }
   useEffect(() => {
@@ -285,27 +307,27 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
       `/organizations/${organizationId}/conversations/${selected}/messages`,
     )
       .then((data) => setMessages(data.messages))
-      .catch((error) => setError(getError(error)));
+      .catch((error) => setError(t(getError(error))));
   }, [selected, organizationId]);
   useEffect(() => {
     if (tab === "sessions")
       api<{ sessions: typeof sessions }>("/auth/sessions")
         .then((data) => setSessions(data.sessions))
-        .catch((error) => setError(getError(error)));
+        .catch((error) => setError(t(getError(error))));
     if (!organizationId || !canManage) return;
     if (tab === "team")
       api<{ members: typeof members }>(
         `/organizations/${organizationId}/members`,
       )
         .then((data) => setMembers(data.members))
-        .catch((error) => setError(getError(error)));
+        .catch((error) => setError(t(getError(error))));
     if (tab === "usage") {
       api<{ totals: typeof usage }>(`/organizations/${organizationId}/usage`)
         .then((data) => setUsage(data.totals))
-        .catch((error) => setError(getError(error)));
+        .catch((error) => setError(t(getError(error))));
       api<typeof budget>(`/organizations/${organizationId}/budgets`)
         .then(setBudget)
-        .catch((error) => setError(getError(error)));
+        .catch((error) => setError(t(getError(error))));
     }
   }, [tab, organizationId, canManage]);
   async function createAssistant(event: FormEvent<HTMLFormElement>) {
@@ -327,10 +349,10 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
         }),
       });
       form.reset();
-      setNotice("Assistant created.");
+      setNotice(t("Assistant created."));
       await load();
     } catch (error) {
-      setError(getError(error));
+      setError(t(getError(error)));
     }
   }
   async function updateAssistant(event: FormEvent<HTMLFormElement>) {
@@ -355,11 +377,11 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
           }),
         },
       );
-      setNotice("Assistant updated.");
+      setNotice(t("Assistant updated."));
       setEditingAssistantId("");
       await load();
     } catch (error) {
-      setError(getError(error));
+      setError(t(getError(error)));
     }
   }
   async function createMember(event: FormEvent<HTMLFormElement>) {
@@ -372,9 +394,9 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
         body: JSON.stringify(data),
       });
       form.reset();
-      setNotice("Invitation sent by email. It expires in 72 hours.");
+      setNotice(t("Invitation sent by email. It expires in 72 hours."));
     } catch (error) {
-      setError(getError(error));
+      setError(t(getError(error)));
     }
   }
   async function setStatus(status: Conversation["status"]) {
@@ -384,9 +406,9 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
         { method: "PATCH", body: JSON.stringify({ status }) },
       );
       await load();
-      setNotice(`Conversation set to ${status}.`);
+      setNotice(`${t("Conversation")}: ${status}.`);
     } catch (error) {
-      setError(getError(error));
+      setError(t(getError(error)));
     }
   }
   async function reply(event: FormEvent<HTMLFormElement>) {
@@ -404,7 +426,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
       );
       setMessages(response.messages);
     } catch (error) {
-      setError(getError(error));
+      setError(t(getError(error)));
     }
   }
   async function logout() {
@@ -412,20 +434,26 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
       await api("/auth/logout", { method: "POST" });
       reload();
     } catch (error) {
-      setError(getError(error));
+      setError(t(getError(error)));
     }
   }
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="wordmark">
-          <span className="wordmark-icon">✳</span>
-          <span>
-            OpenStackTools <strong>AI</strong>
-          </span>
+        <div className="sidebar-top">
+          <Wordmark />
+          <button
+            type="button"
+            className="mobile-menu secondary"
+            aria-controls="product-nav"
+            aria-expanded={navOpen}
+            onClick={() => setNavOpen(!navOpen)}
+          >
+            {t("Menu")}
+          </button>
         </div>
         <label className="org-picker">
-          Organization
+          {t("Organization")}
           <select
             value={organizationId}
             onChange={(event) => setOrganizationId(event.target.value)}
@@ -437,7 +465,11 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
             ))}
           </select>
         </label>
-        <nav aria-label="Main navigation">
+        <nav
+          id="product-nav"
+          aria-label="Product navigation"
+          className={navOpen ? "nav-open" : ""}
+        >
           {(["assistants", "inbox", "team", "usage", "sessions"] as const)
             .filter((item) =>
               item === "team" || item === "usage" ? canManage : true,
@@ -446,36 +478,62 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
               <button
                 key={item}
                 className={tab === item ? "nav-active" : ""}
-                onClick={() => setTab(item)}
+                aria-current={tab === item ? "page" : undefined}
+                onClick={() => {
+                  setTab(item);
+                  setNavOpen(false);
+                }}
               >
-                {item === "inbox"
-                  ? "Conversations"
-                  : item[0].toUpperCase() + item.slice(1)}
+                {t(
+                  item === "inbox"
+                    ? "Conversations"
+                    : item[0].toUpperCase() + item.slice(1),
+                )}
               </button>
             ))}
         </nav>
         <div className="sidebar-footer">
+          <div className="display-controls">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setLocale(locale === "en" ? "tr" : "en")}
+              aria-label={t("Language")}
+            >
+              {locale === "en" ? "TR" : "EN"}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+              aria-label={t("Theme")}
+            >
+              {t(theme === "light" ? "Dark" : "Light")}
+            </button>
+          </div>
           <span>
             {me.user.name}
             <small>{me.user.email}</small>
           </span>
           <button className="text-button" onClick={logout}>
-            Sign out
+            {t("Sign out")}
           </button>
         </div>
       </aside>
       <main className="workspace">
         <header className="workspace-header">
           <div>
-            <span className="eyebrow">Business dashboard</span>
+            <span className="eyebrow">{t("Business dashboard")}</span>
             <h1>
-              {tab === "inbox"
-                ? "Conversations"
-                : tab[0].toUpperCase() + tab.slice(1)}
+              {t(
+                tab === "inbox"
+                  ? "Conversations"
+                  : tab[0].toUpperCase() + tab.slice(1),
+              )}
             </h1>
           </div>
           <button className="secondary" onClick={load}>
-            Refresh
+            {t("Refresh")}
           </button>
         </header>
         {error && (
@@ -491,11 +549,12 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
         {tab === "assistants" && (
           <div className="grid-two">
             <section className="card">
-              <h2>Your assistants</h2>
+              <h2>{t("Your assistants")}</h2>
               {assistants.length === 0 && (
                 <p className="muted">
-                  No assistants yet. Create one to start testing the website
-                  widget.
+                  {t(
+                    "No assistants yet. Create one to start testing the website widget.",
+                  )}
                 </p>
               )}
               {assistants.map((item) => (
@@ -503,8 +562,8 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                   <div>
                     <strong>{item.name}</strong>
                     <p className="muted">
-                      {item.active ? "Active" : "Paused"} ·{" "}
-                      {item.allowedOrigins.length} allowed origins
+                      {t(item.active ? "Active" : "Paused")} ·{" "}
+                      {item.allowedOrigins.length} {t("allowed origins")}
                     </p>
                     <code>{item.publicKey}</code>
                     {canManage && (
@@ -512,7 +571,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                         className="text-button"
                         onClick={() => setEditingAssistantId(item._id)}
                       >
-                        Edit settings
+                        {t("Edit settings")}
                       </button>
                     )}
                   </div>
@@ -522,7 +581,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
             {canManage && (
               <section className="card">
                 <h2>
-                  {editingAssistant ? "Edit assistant" : "Create assistant"}
+                  {t(editingAssistant ? "Edit assistant" : "Create assistant")}
                 </h2>
                 <form
                   key={editingAssistant?._id ?? "new"}
@@ -531,31 +590,33 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                   }
                 >
                   <label>
-                    Name
+                    {t("Name")}
                     <input
                       name="name"
                       minLength={2}
                       maxLength={80}
                       required
-                      placeholder="Customer support"
+                      placeholder={t("Customer support")}
                       defaultValue={editingAssistant?.name}
                     />
                   </label>
                   <label>
-                    Instructions
+                    {t("Instructions")}
                     <textarea
                       name="instructions"
                       minLength={10}
                       maxLength={8000}
                       rows={6}
                       required
-                      placeholder="Describe the assistant's role, tone, and when to hand off."
+                      placeholder={t(
+                        "Describe the assistant's role, tone, and when to hand off.",
+                      )}
                       defaultValue={editingAssistant?.instructions}
                     />
                   </label>
                   <label>
-                    Allowed website origins{" "}
-                    <small>One exact origin per line</small>
+                    {t("Allowed website origins")}{" "}
+                    <small>{t("One exact origin per line")}</small>
                     <textarea
                       name="allowedOrigins"
                       rows={3}
@@ -574,11 +635,11 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                         name="active"
                         defaultChecked={editingAssistant.active}
                       />
-                      Active
+                      {t("Active")}
                     </label>
                   )}
                   <button type="submit">
-                    {editingAssistant ? "Save changes" : "Create assistant"}
+                    {t(editingAssistant ? "Save changes" : "Create assistant")}
                   </button>
                   {editingAssistant && (
                     <button
@@ -586,13 +647,13 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                       className="text-button"
                       onClick={() => setEditingAssistantId("")}
                     >
-                      Cancel editing
+                      {t("Cancel editing")}
                     </button>
                   )}
                 </form>
                 <p className="muted">
-                  Use the public key with <code>/embed.js</code>. See the README
-                  for the embed snippet.
+                  {t("Use the public key with")} <code>/embed.js</code>.{" "}
+                  {t("See the README for the embed snippet.")}
                 </p>
               </section>
             )}
@@ -601,9 +662,9 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
         {tab === "inbox" && (
           <div className="inbox-layout">
             <section className="card conversation-list">
-              <h2>Recent conversations</h2>
+              <h2>{t("Recent conversations")}</h2>
               {conversations.length === 0 && (
-                <p className="muted">No conversations yet.</p>
+                <p className="muted">{t("No conversations yet.")}</p>
               )}
               {conversations.map((item) => (
                 <button
@@ -616,15 +677,17 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                   <strong>
                     {assistants.find(
                       (assistant) => assistant._id === item.assistantId,
-                    )?.name ?? "Assistant"}
+                    )?.name ?? t("Assistant")}
                   </strong>
-                  <span className="badge">{item.status}</span>
-                  <small>{new Date(item.updatedAt).toLocaleString()}</small>
+                  <span className="badge">{t(item.status)}</span>
+                  <small>
+                    {new Date(item.updatedAt).toLocaleString(locale)}
+                  </small>
                 </button>
               ))}
             </section>
             <section className="card message-panel">
-              <h2>{selected ? "Conversation" : "Select a conversation"}</h2>
+              <h2>{t(selected ? "Conversation" : "Select a conversation")}</h2>
               {selected && (
                 <>
                   <div className="message-list">
@@ -633,7 +696,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                         key={message._id}
                         className={`message ${message.role}`}
                       >
-                        <small>{message.role}</small>
+                        <small>{t(message.role)}</small>
                         <p>{message.text}</p>
                       </div>
                     ))}
@@ -644,19 +707,19 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                         className="secondary"
                         onClick={() => setStatus("handoff")}
                       >
-                        Take over
+                        {t("Take over")}
                       </button>
                       <button
                         className="secondary"
                         onClick={() => setStatus("bot")}
                       >
-                        Return to bot
+                        {t("Return to bot")}
                       </button>
                       <button
                         className="secondary"
                         onClick={() => setStatus("closed")}
                       >
-                        Close
+                        {t("Close")}
                       </button>
                     </div>
                   )}
@@ -665,7 +728,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                       ?.status === "handoff" && (
                       <form className="reply-form" onSubmit={reply}>
                         <label>
-                          Reply as staff
+                          {t("Reply as staff")}
                           <textarea
                             name="text"
                             required
@@ -673,7 +736,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                             rows={2}
                           />
                         </label>
-                        <button type="submit">Send reply</button>
+                        <button type="submit">{t("Send reply")}</button>
                       </form>
                     )}
                 </>
@@ -684,35 +747,37 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
         {tab === "team" && canManage && (
           <div className="grid-two">
             <section className="card">
-              <h2>Staff</h2>
+              <h2>{t("Staff")}</h2>
               {members.map((item) => (
                 <div key={item.userId} className="list-item">
-                  <strong>{item.user?.name ?? "Unknown"}</strong>
-                  <span>{item.role}</span>
+                  <strong>{item.user?.name ?? t("Unknown")}</strong>
+                  <span>{t(item.role)}</span>
                   <small>{item.user?.email}</small>
                 </div>
               ))}
             </section>
             {organization?.role === "owner" && (
               <section className="card">
-                <h2>Invite staff</h2>
+                <h2>{t("Invite staff")}</h2>
                 <p className="muted">
-                  Invite a new account. The recipient sets their own password.
+                  {t(
+                    "Invite a new account. The recipient sets their own password.",
+                  )}
                 </p>
                 <form onSubmit={createMember}>
                   <label>
-                    Email
+                    {t("Email")}
                     <input name="email" type="email" required />
                   </label>
                   <label>
-                    Role
+                    {t("Role")}
                     <select name="role">
-                      <option value="agent">Agent</option>
-                      <option value="viewer">Viewer</option>
-                      <option value="admin">Admin</option>
+                      <option value="agent">{t("Agent")}</option>
+                      <option value="viewer">{t("Viewer")}</option>
+                      <option value="admin">{t("Admin")}</option>
                     </select>
                   </label>
-                  <button type="submit">Send invitation</button>
+                  <button type="submit">{t("Send invitation")}</button>
                 </form>
               </section>
             )}
@@ -720,32 +785,33 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
         )}
         {tab === "usage" && canManage && (
           <section className="card">
-            <h2>AI usage and budgets</h2>
+            <h2>{t("AI usage and budgets")}</h2>
             <div className="stat-row">
               <div>
                 <strong>{usage?.inputTokens ?? 0}</strong>
-                <span>Input tokens</span>
+                <span>{t("Input tokens")}</span>
               </div>
               <div>
                 <strong>{usage?.outputTokens ?? 0}</strong>
-                <span>Output tokens</span>
+                <span>{t("Output tokens")}</span>
               </div>
               <div>
                 <strong>
                   ${((usage?.estimatedCostMicros ?? 0) / 1_000_000).toFixed(4)}
                 </strong>
-                <span>Estimated all-time cost</span>
+                <span>{t("Estimated all-time cost")}</span>
               </div>
             </div>
             {budget && (
               <p>
-                Daily limit: ${(budget.dailyLimitMicros / 1_000_000).toFixed(2)}{" "}
-                · Monthly limit: $
+                {t("Daily limit")}: $
+                {(budget.dailyLimitMicros / 1_000_000).toFixed(2)} ·{" "}
+                {t("Monthly limit")}: $
                 {(budget.monthlyLimitMicros / 1_000_000).toFixed(2)}.{" "}
                 {budget.windows
                   .map(
                     (window) =>
-                      `${window.kind}: $${((window.spentMicros + window.reservedMicros) / 1_000_000).toFixed(4)} committed`,
+                      `${t(window.kind)}: $${((window.spentMicros + window.reservedMicros) / 1_000_000).toFixed(4)} ${t("committed")}`,
                   )
                   .join(" · ")}
               </p>
@@ -768,14 +834,14 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                         `/organizations/${organizationId}/budgets`,
                       ),
                     );
-                    setNotice("Budgets updated.");
+                    setNotice(t("Budgets updated."));
                   } catch (error) {
-                    setError(getError(error));
+                    setError(t(getError(error)));
                   }
                 }}
               >
                 <label>
-                  Daily USD
+                  {t("Daily USD")}
                   <input
                     name="dailyUsd"
                     required
@@ -783,31 +849,34 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                   />
                 </label>
                 <label>
-                  Monthly USD
+                  {t("Monthly USD")}
                   <input
                     name="monthlyUsd"
                     required
                     defaultValue={(budget?.monthlyLimitMicros ?? 0) / 1_000_000}
                   />
                 </label>
-                <button type="submit">Update budgets</button>
+                <button type="submit">{t("Update budgets")}</button>
               </form>
             )}
           </section>
         )}
         {tab === "sessions" && (
           <section className="card">
-            <h2>Your sessions</h2>
+            <h2>{t("Your sessions")}</h2>
             <p className="muted">
-              Revoke sessions you no longer use. Revoking this session signs you
-              out.
+              {t(
+                "Revoke sessions you no longer use. Revoking this session signs you out.",
+              )}
             </p>
             {sessions.map((session) => (
               <div className="list-item" key={session.id}>
                 <span>
-                  {session.current ? "This device" : "Other session"} · Started{" "}
-                  {new Date(session.createdAt).toLocaleString()} · Expires{" "}
-                  {new Date(session.expiresAt).toLocaleString()}
+                  {t(session.current ? "This device" : "Other session")} ·{" "}
+                  {t("Started")}{" "}
+                  {new Date(session.createdAt).toLocaleString(locale)} ·{" "}
+                  {t("Expires")}{" "}
+                  {new Date(session.expiresAt).toLocaleString(locale)}
                 </span>
                 <button
                   type="button"
@@ -823,11 +892,11 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                           previous.filter((item) => item.id !== session.id),
                         );
                     } catch (error) {
-                      setError(getError(error));
+                      setError(t(getError(error)));
                     }
                   }}
                 >
-                  Revoke
+                  {t("Revoke")}
                 </button>
               </div>
             ))}
@@ -838,6 +907,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
   );
 }
 export default function App() {
+  const { t } = usePreferences();
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   async function load() {
@@ -856,7 +926,7 @@ export default function App() {
   if (loading)
     return (
       <div className="loading-screen" role="status">
-        Loading workspace…
+        {t("Loading workspace…")}
       </div>
     );
   return me ? (

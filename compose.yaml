@@ -1,4 +1,8 @@
 services:
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - "127.0.0.1:8025:8025"
   mongo:
     image: mongo:8
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
@@ -26,11 +30,16 @@ services:
       DASHBOARD_ORIGIN: http://localhost:5173
       NODE_ENV: development
       COOKIE_SECURE: "false"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM: "OpenStackTools AI <no-reply@localhost>"
     ports:
       - "127.0.0.1:5000:5000"
     depends_on:
       mongo-init:
         condition: service_completed_successfully
+      mailpit:
+        condition: service_started
   web:
     build:
       context: .

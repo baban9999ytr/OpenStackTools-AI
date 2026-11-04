@@ -1,9 +1,13 @@
 import { Router } from "express";
-import mongoose from "mongoose";
-import { hash } from "bcrypt";
 import { z } from "zod";
-import { Membership, Organization, User } from "../models/index.js";
-import { validate, email, password } from "../middleware/validate.js";
+import {
+  Membership,
+  Organization,
+  User,
+  AccountToken,
+} from "../models/index.js";
+import { validate, email } from "../middleware/validate.js";
+import { createAccountToken } from "./auth.js";
 import { requireMembership, requireUser } from "../middleware/security.js";
 import { parseUsdMicros } from "../services/money.js";
 import { BudgetWindow } from "../models/index.js";
@@ -11,9 +15,7 @@ import { utcPeriods } from "../services/budget.js";
 const router = Router();
 router.use(requireUser);
 const staffInput = z.strictObject({
-  name: z.string().trim().min(1).max(100),
   email,
-  password,
   role: z.enum(["admin", "agent", "viewer"]),
 });
 router.get(
@@ -96,38 +98,34 @@ router.patch(
   },
 );
 router.post(
-  "/:organizationId/members",
+  "/:organizationId/invitations",
   requireMembership(["owner"]),
   validate(staffInput),
   async (req, res) => {
-    const { name, email, password, role } = req.body as z.infer<
-      typeof staffInput
-    >;
-    const session = await mongoose.startSession();
-    let userId: mongoose.Types.ObjectId | undefined;
-    try {
-      await session.withTransaction(async () => {
-        const [user] = await User.create(
-          [{ name, email, passwordHash: await hash(password, 12) }],
-          { session },
-        );
-        if (!user) throw new Error("Account creation failed");
-        await Membership.create(
-          [
-            {
-              organizationId: res.locals.organizationId,
-              userId: user._id,
-              role,
-            },
-          ],
-          { session },
-        );
-        userId = user._id;
-      });
-    } finally {
-      await session.endSession();
+    const { email, role } = req.body as z.infer<typeof staffInput>;
+    if (await User.exists({ email })) {
+      res
+        .status(409)
+        .json({
+          error:
+            "Account already exists; multi-organization invites are not yet supported",
+        });
+      return;
     }
-    res.status(201).json({ member: { userId, name, email, role } });
+    await AccountToken.updateMany(
+      {
+        organizationId: res.locals.organizationId,
+        email,
+        purpose: "invite",
+        usedAt: { $exists: false },
+      },
+      { $set: { usedAt: new Date() } },
+    );
+    await createAccountToken("invite", email, {
+      organizationId: res.locals.organizationId,
+      role,
+    });
+    res.status(201).json({ invitation: { email, role, expiresInHours: 72 } });
   },
 );
 router.get(

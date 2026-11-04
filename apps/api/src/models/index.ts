@@ -12,6 +12,7 @@ const userSchema = new Schema(
     },
     name: { type: String, required: true, trim: true },
     passwordHash: { type: String, required: true, select: false },
+    emailVerifiedAt: { type: Date },
   },
   options,
 );
@@ -142,6 +143,27 @@ const sessionSchema = new Schema(
 );
 sessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 export const Session = mongoose.model("Session", sessionSchema);
+
+const accountTokenSchema = new Schema(
+  {
+    tokenHash: { type: String, required: true, unique: true },
+    purpose: {
+      type: String,
+      enum: ["verify", "reset", "invite"],
+      required: true,
+    },
+    userId: { type: Schema.Types.ObjectId, ref: "User" },
+    organizationId: { type: Schema.Types.ObjectId, ref: "Organization" },
+    email: { type: String, required: true },
+    role: { type: String, enum: roles },
+    expiresAt: { type: Date, required: true },
+    usedAt: { type: Date },
+  },
+  options,
+);
+accountTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+accountTokenSchema.index({ organizationId: 1, purpose: 1, email: 1 });
+export const AccountToken = mongoose.model("AccountToken", accountTokenSchema);
 
 const widgetSessionSchema = new Schema(
   {

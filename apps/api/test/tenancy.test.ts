@@ -14,8 +14,15 @@ process.env.DEFAULT_MONTHLY_BUDGET_USD = "10";
 process.env.OPENAI_INPUT_USD_PER_MILLION_TOKENS = "1";
 process.env.OPENAI_OUTPUT_USD_PER_MILLION_TOKENS = "1";
 process.env.DASHBOARD_ORIGIN = "http://localhost:5173";
+process.env.SMTP_HOST = "localhost";
+process.env.SMTP_FROM = "test@example.test";
 let replset: MongoMemoryReplSet;
 const { createApp } = await import("../src/app.js");
+const { setMailSenderForTests } = await import("../src/services/mail.js");
+const mailed = new Map<string, string>();
+setMailSenderForTests(async ({ to, token }) => {
+  mailed.set(to, token);
+});
 const { distributedLimit } = await import("../src/middleware/limits.js");
 const { maximumReservationMicros } = await import("../src/services/budget.js");
 const { processPendingRequests } =
@@ -82,7 +89,22 @@ test("register separate organizations and reject invalid input", async () => {
     });
   assert.equal(a.status, 201, JSON.stringify(a.body));
   orgA = a.body.organization.id;
-  cookieA = cookieFrom(a);
+  assert.equal(a.body.verificationRequired, true);
+  assert.equal(
+    (
+      await request(app)
+        .post("/api/auth/login")
+        .set(dashboardHeaders)
+        .send({ email: "alice@example.test", password: "long-password-123" })
+    ).status,
+    403,
+  );
+  const verifiedA = await request(app)
+    .post("/api/auth/verify-email")
+    .set(dashboardHeaders)
+    .send({ token: mailed.get("alice@example.test") });
+  assert.equal(verifiedA.status, 200);
+  cookieA = cookieFrom(verifiedA);
   assert.match(cookieA, /^ost_session=/);
   const b = await request(app)
     .post("/api/auth/register")
@@ -95,7 +117,12 @@ test("register separate organizations and reject invalid input", async () => {
     });
   assert.equal(b.status, 201, JSON.stringify(b.body));
   orgB = b.body.organization.id;
-  cookieB = cookieFrom(b);
+  const verifiedB = await request(app)
+    .post("/api/auth/verify-email")
+    .set(dashboardHeaders)
+    .send({ token: mailed.get("bob@example.test") });
+  assert.equal(verifiedB.status, 200);
+  cookieB = cookieFrom(verifiedB);
   assert.notEqual(orgA, orgB);
   assert.equal(
     (await request(app).get("/api/auth/me").set("Cookie", cookieA)).status,
@@ -255,16 +282,23 @@ test("widget origin, visitor isolation, AI usage and handoff", async () => {
 
 test("staff role checks, login and logout", async () => {
   const staff = await request(app)
-    .post(`/api/organizations/${orgA}/members`)
+    .post(`/api/organizations/${orgA}/invitations`)
     .set(dashboardHeaders)
     .set("Cookie", cookieA)
     .send({
-      name: "Val",
       email: "val@example.test",
-      password: "another-long-password",
       role: "viewer",
     });
   assert.equal(staff.status, 201, JSON.stringify(staff.body));
+  const accepted = await request(app)
+    .post("/api/auth/accept-invitation")
+    .set(dashboardHeaders)
+    .send({
+      token: mailed.get("val@example.test"),
+      name: "Val",
+      password: "another-long-password",
+    });
+  assert.equal(accepted.status, 201, JSON.stringify(accepted.body));
   const login = await request(app)
     .post("/api/auth/login")
     .set(dashboardHeaders)
@@ -487,5 +521,86 @@ test("failed provider attempt is conservatively charged and retried once", async
       billingStatus: "measured",
     }),
     1,
+  );
+});
+
+test("invitation is single use and password reset revokes sessions", async () => {
+  const invited = await request(app)
+    .post(`/api/organizations/${orgA}/invitations`)
+    .set(dashboardHeaders)
+    .set("Cookie", cookieA)
+    .send({ email: "agent@example.test", role: "agent" });
+  assert.equal(invited.status, 201, JSON.stringify(invited.body));
+  const token = mailed.get("agent@example.test");
+  assert.ok(token);
+  const accepted = await request(app)
+    .post("/api/auth/accept-invitation")
+    .set(dashboardHeaders)
+    .send({ token, name: "Agent", password: "a-secure-password-123" });
+  assert.equal(accepted.status, 201, JSON.stringify(accepted.body));
+  assert.equal(
+    (
+      await request(app)
+        .post("/api/auth/accept-invitation")
+        .set(dashboardHeaders)
+        .send({ token, name: "Agent", password: "a-secure-password-123" })
+    ).status,
+    400,
+  );
+  const agentCookie = cookieFrom(accepted);
+  assert.equal(
+    (
+      await request(app)
+        .get(`/api/organizations/${orgA}/conversations`)
+        .set("Cookie", agentCookie)
+    ).status,
+    200,
+  );
+  assert.equal(
+    (
+      await request(app)
+        .get(`/api/organizations/${orgB}/conversations`)
+        .set("Cookie", agentCookie)
+    ).status,
+    403,
+  );
+  const sessions = await request(app)
+    .get("/api/auth/sessions")
+    .set("Cookie", agentCookie);
+  assert.equal(sessions.body.sessions.length, 1);
+  await request(app)
+    .post("/api/auth/request-password-reset")
+    .set(dashboardHeaders)
+    .send({ email: "agent@example.test" });
+  const resetToken = mailed.get("agent@example.test");
+  const reset = await request(app)
+    .post("/api/auth/reset-password")
+    .set(dashboardHeaders)
+    .send({ token: resetToken, password: "new-secure-password-123" });
+  assert.equal(reset.status, 200, JSON.stringify(reset.body));
+  assert.equal(
+    (await request(app).get("/api/auth/me").set("Cookie", agentCookie)).status,
+    401,
+  );
+  assert.equal(
+    (
+      await request(app)
+        .post("/api/auth/reset-password")
+        .set(dashboardHeaders)
+        .send({ token: resetToken, password: "new-secure-password-123" })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request(app)
+        .post("/api/auth/login")
+        .set(dashboardHeaders)
+        .send({
+          email: "agent@example.test",
+          password: "new-secure-password-123",
+        })
+    ).status,
+    200,
   );
 });

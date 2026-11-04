@@ -27,6 +27,11 @@ export const env = {
     process.env.COOKIE_SECURE === "true" ||
     process.env.NODE_ENV === "production",
   trustProxy: Number(process.env.TRUST_PROXY ?? 0),
+  smtpHost: must("SMTP_HOST"),
+  smtpPort: Number(process.env.SMTP_PORT ?? 1025),
+  smtpFrom: must("SMTP_FROM"),
+  smtpUser: process.env.SMTP_USER,
+  smtpPassword: process.env.SMTP_PASSWORD,
 };
 if (env.sessionSecret.length < 32)
   throw new Error("SESSION_SECRET must be at least 32 characters");
@@ -36,6 +41,8 @@ if (!Number.isInteger(env.trustProxy) || env.trustProxy < 0)
   throw new Error("Invalid TRUST_PROXY");
 if (new URL(env.dashboardOrigin).origin !== env.dashboardOrigin)
   throw new Error("DASHBOARD_ORIGIN must be an origin");
+if (!Number.isInteger(env.smtpPort) || env.smtpPort < 1 || env.smtpPort > 65535)
+  throw new Error("Invalid SMTP_PORT");
 
 if (env.defaultMonthlyBudgetMicros < env.defaultDailyBudgetMicros)
   throw new Error("Monthly budget must be at least the daily budget");

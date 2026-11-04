@@ -13,7 +13,19 @@ const getError = (error: unknown) =>
   error instanceof Error ? error.message : "Something went wrong";
 
 function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const link = new URLSearchParams(window.location.hash.slice(1));
+  const [mode, setMode] = useState<
+    "login" | "register" | "verify" | "reset" | "invite" | "forgot"
+  >(
+    link.has("verify")
+      ? "verify"
+      : link.has("reset")
+        ? "reset"
+        : link.has("invite")
+          ? "invite"
+          : "login",
+  );
+  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -22,11 +34,36 @@ function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
     setBusy(true);
     const data = Object.fromEntries(new FormData(event.currentTarget));
     try {
-      await api(`/auth/${mode}`, {
+      const endpoint =
+        mode === "forgot"
+          ? "request-password-reset"
+          : mode === "verify"
+            ? "verify-email"
+            : mode === "reset"
+              ? "reset-password"
+              : mode === "invite"
+                ? "accept-invitation"
+                : mode;
+      await api(`/auth/${endpoint}`, {
         method: "POST",
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          ...data,
+          ...(mode === "verify" || mode === "reset" || mode === "invite"
+            ? { token: link.get(mode) }
+            : {}),
+        }),
       });
-      onSuccess();
+      if (mode === "register" || mode === "forgot") {
+        setNotice(
+          mode === "register"
+            ? "Check your email to verify your account."
+            : "If that account exists, a reset link has been sent.",
+        );
+        setMode("login");
+      } else {
+        window.history.replaceState(null, "", window.location.pathname);
+        onSuccess();
+      }
     } catch (error) {
       setError(getError(error));
     } finally {
@@ -50,25 +87,41 @@ function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
       </section>
       <section className="auth-panel">
         <div className="card auth-card">
-          <h2>{mode === "login" ? "Welcome back" : "Create your workspace"}</h2>
+          <h2>
+            {mode === "login"
+              ? "Welcome back"
+              : mode === "register"
+                ? "Create your workspace"
+                : mode === "forgot"
+                  ? "Reset your password"
+                  : mode === "verify"
+                    ? "Verify your email"
+                    : mode === "invite"
+                      ? "Accept invitation"
+                      : "Choose a new password"}
+          </h2>
           <p className="muted">
             {mode === "login"
               ? "Sign in to your business dashboard."
-              : "Start with an organization and an owner account."}
+              : mode === "register"
+                ? "Start with an organization and an owner account."
+                : "Complete this secure account step."}
           </p>
           <form onSubmit={submit}>
-            {mode === "register" && (
+            {(mode === "register" || mode === "invite") && (
               <>
-                <label>
-                  Organization name
-                  <input
-                    name="organizationName"
-                    minLength={2}
-                    maxLength={100}
-                    required
-                    autoComplete="organization"
-                  />
-                </label>
+                {mode === "register" && (
+                  <label>
+                    Organization name
+                    <input
+                      name="organizationName"
+                      minLength={2}
+                      maxLength={100}
+                      required
+                      autoComplete="organization"
+                    />
+                  </label>
+                )}
                 <label>
                   Your name
                   <input
@@ -80,22 +133,35 @@ function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
                 </label>
               </>
             )}
-            <label>
-              Email
-              <input name="email" type="email" required autoComplete="email" />
-            </label>
-            <label>
-              Password
-              <input
-                name="password"
-                type="password"
-                required
-                minLength={mode === "register" ? 12 : undefined}
-                autoComplete={
-                  mode === "login" ? "current-password" : "new-password"
-                }
-              />
-            </label>
+            {(mode === "login" || mode === "register" || mode === "forgot") && (
+              <label>
+                Email
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                />
+              </label>
+            )}
+            {(mode === "login" ||
+              mode === "register" ||
+              mode === "reset" ||
+              mode === "invite") && (
+              <label>
+                Password
+                <input
+                  name="password"
+                  type="password"
+                  required
+                  minLength={mode === "login" ? undefined : 12}
+                  autoComplete={
+                    mode === "login" ? "current-password" : "new-password"
+                  }
+                />
+              </label>
+            )}
+            {notice && <p role="status">{notice}</p>}
             {error && (
               <p role="alert" className="error">
                 {error}
@@ -106,20 +172,31 @@ function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
                 ? "Please wait…"
                 : mode === "login"
                   ? "Sign in"
-                  : "Create workspace"}
+                  : mode === "register"
+                    ? "Create workspace"
+                    : mode === "forgot"
+                      ? "Send reset link"
+                      : "Continue"}
             </button>
           </form>
-          <button
-            className="text-button"
-            onClick={() => {
-              setMode(mode === "login" ? "register" : "login");
-              setError("");
-            }}
-          >
-            {mode === "login"
-              ? "Create an account"
-              : "Already have an account? Sign in"}
-          </button>
+          {(mode === "login" || mode === "register") && (
+            <button
+              className="text-button"
+              onClick={() => {
+                setMode(mode === "login" ? "register" : "login");
+                setError("");
+              }}
+            >
+              {mode === "login"
+                ? "Create an account"
+                : "Already have an account? Sign in"}
+            </button>
+          )}
+          {mode === "login" && (
+            <button className="text-button" onClick={() => setMode("forgot")}>
+              Forgot password?
+            </button>
+          )}
         </div>
       </section>
     </main>
@@ -154,6 +231,16 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
   const [usage, setUsage] = useState<{
     inputTokens: number;
     outputTokens: number;
+    estimatedCostMicros: number;
+  } | null>(null);
+  const [budget, setBudget] = useState<{
+    dailyLimitMicros: number;
+    monthlyLimitMicros: number;
+    windows: Array<{
+      kind: string;
+      spentMicros: number;
+      reservedMicros: number;
+    }>;
   } | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -200,10 +287,14 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
       )
         .then((data) => setMembers(data.members))
         .catch((error) => setError(getError(error)));
-    if (tab === "usage")
+    if (tab === "usage") {
       api<{ totals: typeof usage }>(`/organizations/${organizationId}/usage`)
         .then((data) => setUsage(data.totals))
         .catch((error) => setError(getError(error)));
+      api<typeof budget>(`/organizations/${organizationId}/budgets`)
+        .then(setBudget)
+        .catch((error) => setError(getError(error)));
+    }
   }, [tab, organizationId, canManage]);
   async function createAssistant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -264,18 +355,12 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
     const form = event.currentTarget;
     const data = Object.fromEntries(new FormData(form));
     try {
-      await api(`/organizations/${organizationId}/members`, {
+      await api(`/organizations/${organizationId}/invitations`, {
         method: "POST",
         body: JSON.stringify(data),
       });
       form.reset();
-      setNotice(
-        "Staff account created. Share the temporary password securely.",
-      );
-      const response = await api<{ members: typeof members }>(
-        `/organizations/${organizationId}/members`,
-      );
-      setMembers(response.members);
+      setNotice("Invitation sent by email. It expires in 72 hours.");
     } catch (error) {
       setError(getError(error));
     }
@@ -598,28 +683,14 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
             </section>
             {organization?.role === "owner" && (
               <section className="card">
-                <h2>Add staff account</h2>
+                <h2>Invite staff</h2>
                 <p className="muted">
-                  This early workflow creates a new account. Invitation and
-                  password reset flows are planned.
+                  Invite a new account. The recipient sets their own password.
                 </p>
                 <form onSubmit={createMember}>
                   <label>
-                    Name
-                    <input name="name" required />
-                  </label>
-                  <label>
                     Email
                     <input name="email" type="email" required />
-                  </label>
-                  <label>
-                    Temporary password
-                    <input
-                      name="password"
-                      type="password"
-                      minLength={12}
-                      required
-                    />
                   </label>
                   <label>
                     Role
@@ -629,7 +700,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                       <option value="admin">Admin</option>
                     </select>
                   </label>
-                  <button type="submit">Create staff account</button>
+                  <button type="submit">Send invitation</button>
                 </form>
               </section>
             )}
@@ -637,11 +708,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
         )}
         {tab === "usage" && canManage && (
           <section className="card">
-            <h2>Recent AI usage</h2>
-            <p className="muted">
-              Totals from the latest 100 recorded requests. Cost and quota
-              enforcement are planned.
-            </p>
+            <h2>AI usage and budgets</h2>
             <div className="stat-row">
               <div>
                 <strong>{usage?.inputTokens ?? 0}</strong>
@@ -651,7 +718,69 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                 <strong>{usage?.outputTokens ?? 0}</strong>
                 <span>Output tokens</span>
               </div>
+              <div>
+                <strong>
+                  ${((usage?.estimatedCostMicros ?? 0) / 1_000_000).toFixed(4)}
+                </strong>
+                <span>Estimated all-time cost</span>
+              </div>
             </div>
+            {budget && (
+              <p>
+                Daily limit: ${(budget.dailyLimitMicros / 1_000_000).toFixed(2)}{" "}
+                · Monthly limit: $
+                {(budget.monthlyLimitMicros / 1_000_000).toFixed(2)}.{" "}
+                {budget.windows
+                  .map(
+                    (window) =>
+                      `${window.kind}: $${((window.spentMicros + window.reservedMicros) / 1_000_000).toFixed(4)} committed`,
+                  )
+                  .join(" · ")}
+              </p>
+            )}
+            {organization?.role === "owner" && (
+              <form
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  const data = new FormData(event.currentTarget);
+                  try {
+                    await api(`/organizations/${organizationId}/budgets`, {
+                      method: "PATCH",
+                      body: JSON.stringify({
+                        dailyUsd: data.get("dailyUsd"),
+                        monthlyUsd: data.get("monthlyUsd"),
+                      }),
+                    });
+                    setBudget(
+                      await api<typeof budget>(
+                        `/organizations/${organizationId}/budgets`,
+                      ),
+                    );
+                    setNotice("Budgets updated.");
+                  } catch (error) {
+                    setError(getError(error));
+                  }
+                }}
+              >
+                <label>
+                  Daily USD
+                  <input
+                    name="dailyUsd"
+                    required
+                    defaultValue={(budget?.dailyLimitMicros ?? 0) / 1_000_000}
+                  />
+                </label>
+                <label>
+                  Monthly USD
+                  <input
+                    name="monthlyUsd"
+                    required
+                    defaultValue={(budget?.monthlyLimitMicros ?? 0) / 1_000_000}
+                  />
+                </label>
+                <button type="submit">Update budgets</button>
+              </form>
+            )}
           </section>
         )}
       </main>

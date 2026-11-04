@@ -1,0 +1,27 @@
+import "dotenv/config";
+const must = (key: string): string => {
+  const value = process.env[key]?.trim();
+  if (!value) throw new Error(`Missing ${key}`);
+  return value;
+};
+export const env = {
+  nodeEnv: process.env.NODE_ENV ?? "development",
+  port: Number(process.env.PORT ?? 5000),
+  mongoUrl: must("MONGODB_URL"),
+  dashboardOrigin: must("DASHBOARD_ORIGIN"),
+  sessionSecret: must("SESSION_SECRET"),
+  openaiApiKey: must("OPENAI_API_KEY"),
+  openaiModel: must("OPENAI_MODEL"),
+  cookieSecure:
+    process.env.COOKIE_SECURE === "true" ||
+    process.env.NODE_ENV === "production",
+  trustProxy: Number(process.env.TRUST_PROXY ?? 0),
+};
+if (env.sessionSecret.length < 32)
+  throw new Error("SESSION_SECRET must be at least 32 characters");
+if (!Number.isInteger(env.port) || env.port < 1 || env.port > 65535)
+  throw new Error("Invalid PORT");
+if (!Number.isInteger(env.trustProxy) || env.trustProxy < 0)
+  throw new Error("Invalid TRUST_PROXY");
+if (new URL(env.dashboardOrigin).origin !== env.dashboardOrigin)
+  throw new Error("DASHBOARD_ORIGIN must be an origin");

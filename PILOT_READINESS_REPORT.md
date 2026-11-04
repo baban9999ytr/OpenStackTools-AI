@@ -10,7 +10,7 @@ The foundation is suitable for a **controlled, monitored first-business pilot** 
 | --- | --- |
 | AI budget | Server-enforced UTC daily and monthly limits per organization. MongoDB transactions reserve a conservative maximum across both windows before the provider call; measured usage settles the reservation. A failed or timed-out attempt consumes the full reservation as uncertain cost. Owner budget settings and a migration for older organizations were added. |
 | Request reliability | MongoDB-backed rate counters shared by API instances; durable first-message idempotency; per-conversation processing leases; serialized replies; worker recovery and one retry. Widget requests can return 202 and be polled. |
-| Accounts | Email verification, expiring single-use invitations and reset links, password reset session revocation, session list/revoke endpoints. No staff password is entered by an owner or emailed. Mailpit is available in local Compose. |
+| Accounts | Email verification, expiring single-use invitations and reset links, password reset session revocation, and dashboard session list/revoke controls. No staff password is entered by an owner or emailed. Mailpit is available in local Compose. |
 | Website widget | Tab-scoped session restoration for 24 hours, latest-message reload, pending request recovery with the same message ID, queued/handoff/error states, and a clear-session control. |
 | Operations | Organization retention setting and daily cleanup of inactive conversations, messages, and requests; paged owner export; password-confirmed full tenant deletion; staff mutation audit records; backup/restore and monitoring runbooks. |
 

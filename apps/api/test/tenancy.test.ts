@@ -444,7 +444,10 @@ test("daily and monthly budgets reject concurrent AI requests across visitors", 
     .set("Cookie", cookieB)
     .send({ dailyUsd: "1", monthlyUsd: "1" });
   assert.equal(monthlyOnly.status, 200);
-  await BudgetWindow.updateOne({ organizationId: orgB, kind: "month" }, { $set: { spentMicros: 1_000_000, limitMicros: 1_000_000 } });
+  await BudgetWindow.updateOne(
+    { organizationId: orgB, kind: "month" },
+    { $set: { spentMicros: 1_000_000, limitMicros: 1_000_000 } },
+  );
   const monthlySession = await request(app)
     .post("/api/widget/sessions")
     .set(websiteHeaders)

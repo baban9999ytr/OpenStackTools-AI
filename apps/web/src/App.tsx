@@ -210,9 +210,9 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
   const organization = me.organizations.find(
     (item) => item.id === organizationId,
   );
-  const [tab, setTab] = useState<"assistants" | "inbox" | "team" | "usage">(
-    "assistants",
-  );
+  const [tab, setTab] = useState<
+    "assistants" | "inbox" | "team" | "usage" | "sessions"
+  >("assistants");
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [editingAssistantId, setEditingAssistantId] = useState("");
   const editingAssistant = assistants.find(
@@ -242,6 +242,14 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
       reservedMicros: number;
     }>;
   } | null>(null);
+  const [sessions, setSessions] = useState<
+    Array<{
+      id: string;
+      createdAt: string;
+      expiresAt: string;
+      current: boolean;
+    }>
+  >([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const canManage =
@@ -280,6 +288,10 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
       .catch((error) => setError(getError(error)));
   }, [selected, organizationId]);
   useEffect(() => {
+    if (tab === "sessions")
+      api<{ sessions: typeof sessions }>("/auth/sessions")
+        .then((data) => setSessions(data.sessions))
+        .catch((error) => setError(getError(error)));
     if (!organizationId || !canManage) return;
     if (tab === "team")
       api<{ members: typeof members }>(
@@ -426,7 +438,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
           </select>
         </label>
         <nav aria-label="Main navigation">
-          {(["assistants", "inbox", "team", "usage"] as const)
+          {(["assistants", "inbox", "team", "usage", "sessions"] as const)
             .filter((item) =>
               item === "team" || item === "usage" ? canManage : true,
             )
@@ -781,6 +793,44 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                 <button type="submit">Update budgets</button>
               </form>
             )}
+          </section>
+        )}
+        {tab === "sessions" && (
+          <section className="card">
+            <h2>Your sessions</h2>
+            <p className="muted">
+              Revoke sessions you no longer use. Revoking this session signs you
+              out.
+            </p>
+            {sessions.map((session) => (
+              <div className="list-item" key={session.id}>
+                <span>
+                  {session.current ? "This device" : "Other session"} · Started{" "}
+                  {new Date(session.createdAt).toLocaleString()} · Expires{" "}
+                  {new Date(session.expiresAt).toLocaleString()}
+                </span>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={async () => {
+                    try {
+                      await api(`/auth/sessions/${session.id}`, {
+                        method: "DELETE",
+                      });
+                      if (session.current) reload();
+                      else
+                        setSessions((previous) =>
+                          previous.filter((item) => item.id !== session.id),
+                        );
+                    } catch (error) {
+                      setError(getError(error));
+                    }
+                  }}
+                >
+                  Revoke
+                </button>
+              </div>
+            ))}
           </section>
         )}
       </main>

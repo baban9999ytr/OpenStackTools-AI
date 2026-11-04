@@ -8,7 +8,7 @@ Organizations, roles, verified accounts, owner invitations, reset and session re
 
 1. Configure real provider model/prices, SMTP, budgets, TLS, private MongoDB, backup/restore, exact origins, monitoring, and privacy notice. Exercise the full journey with the pilot business. Complexity: medium, operational.
 2. Test multi-instance worker recovery, provider timeouts, invoice reconciliation, and production-like traffic. Add alerts for budget exhaustion, uncertain charges, queue age, and failed email. Complexity: medium.
-3. Add a staff session management screen and perform an accessibility review with assistive technology. Endpoints and initial widget states exist; the dashboard session UI remains. Complexity: low to medium.
+3. Perform an accessibility review with assistive technology and refine widget reconnect behavior on low-quality networks. Session management is available in the dashboard. Complexity: low to medium.
 
 ## After pilot validation
 

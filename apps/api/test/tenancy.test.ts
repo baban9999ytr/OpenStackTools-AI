@@ -35,6 +35,7 @@ const {
   UsageEvent,
   Conversation,
   Organization,
+  AuditEvent,
   RateCounter,
 } = await import("../src/models/index.js");
 const app = createApp(async () => ({
@@ -664,6 +665,22 @@ test("owner export is tenant scoped and retention removes expired conversations"
         .send({ days: 1 })
     ).status,
     200,
+  );
+  for (
+    let attempt = 0;
+    attempt < 20 &&
+    !(await AuditEvent.exists({
+      organizationId: orgA,
+      target: { $regex: "/retention$" },
+    }));
+    attempt++
+  )
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(
+    await AuditEvent.exists({
+      organizationId: orgA,
+      target: { $regex: "/retention$" },
+    }),
   );
   const old = await Conversation.create({
     organizationId: orgA,

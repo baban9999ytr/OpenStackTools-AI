@@ -14,11 +14,11 @@ This repository was created in a new directory from the product requirements. No
 
 ```bash
 cp apps/api/.env.example apps/api/.env
-# Edit apps/api/.env: set a random SESSION_SECRET (32+ characters), OPENAI_API_KEY, and OPENAI_MODEL.
+# Set SESSION_SECRET, OPENAI_API_KEY, OPENAI_MODEL, budgets, model token prices, and SMTP settings.
 docker compose up --build
 ```
 
-Open `http://localhost:5173`. MongoDB is initialized as a single-node replica set for development. The Docker configuration binds API and web ports to localhost; MongoDB is reachable only inside the Compose network. Data persists in a Docker named volume. Do not use this Compose file as a production deployment.
+Open `http://localhost:5173` and use Mailpit at `http://localhost:8025` to open verification and invitation email. MongoDB is initialized as a single-node replica set for development. The Docker configuration binds API and web ports to localhost; MongoDB is reachable only inside the Compose network. Data persists in a Docker named volume. Do not use this Compose file as a production deployment.
 
 ## Run from Node.js
 
@@ -35,7 +35,7 @@ Use separate terminals for the two dev commands. Vite proxies `/api` to the back
 
 ## First use
 
-1. Register an organization and owner account in the dashboard.
+1. Register an organization and owner account in the dashboard, then verify the email link. Staff join through owner-sent invitations and set their own passwords.
 2. Create an assistant with instructions and an allowed website origin such as `http://localhost:5173`.
 3. Add the following script to a site hosted at one of that assistant's allowed origins, using the assistant's public key:
 
@@ -56,6 +56,9 @@ The public key is an identifier, not a credential. The browser requests a short-
 | `SESSION_SECRET` | Secret used to hash opaque session tokens; never expose to the browser |
 | `OPENAI_API_KEY` | Server-side provider key |
 | `OPENAI_MODEL` | Configured Chat Completions model |
+| `DEFAULT_DAILY_BUDGET_USD` / `DEFAULT_MONTHLY_BUDGET_USD` | New-organization AI spend caps in USD |
+| `OPENAI_INPUT_USD_PER_MILLION_TOKENS` / `OPENAI_OUTPUT_USD_PER_MILLION_TOKENS` | Current model prices used for cost estimates and budget reservations |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_FROM` | Account email; optional `SMTP_USER` and `SMTP_PASSWORD` |
 | `DASHBOARD_ORIGIN` | Exact dashboard browser origin used for CORS and CSRF checks |
 | `PORT` | API port, default 5000 |
 | `NODE_ENV` / `COOKIE_SECURE` | Enable Secure cookies for HTTPS production |
@@ -71,10 +74,11 @@ Frontend environment variables are public. Store credentials only in the API env
 npm run typecheck
 npm run build
 npm test
+npm run test:browser -w apps/web
 npm audit --audit-level=low
 ```
 
-`GET /health/live` confirms the API process is alive; `GET /health/ready` checks MongoDB connectivity. Tests use a real ephemeral MongoDB replica set and a fake AI responder. They do not call OpenAI. See [security review](docs/SECURITY_REVIEW.md) for remaining release gates.
+`GET /health/live` confirms the API process is alive; `GET /health/ready` checks MongoDB connectivity. API tests use a real ephemeral MongoDB replica set and a fake AI responder. The Chromium widget test uses mocked API responses. Neither calls OpenAI. See [pilot report](PILOT_READINESS_REPORT.md) and [security review](docs/SECURITY_REVIEW.md) for remaining release gates.
 
 ## Documentation
 

@@ -1,23 +1,20 @@
-# Security review
+# Pilot security review
 
 ## Implemented controls
 
-- Staff sessions use 32-byte random opaque tokens in host-only, HttpOnly, SameSite=Lax cookies. MongoDB stores an HMAC hash, never the raw cookie. Logout deletes the session. Secure cookies are enabled in production.
-- Mutating dashboard routes require an exact `Origin` and `X-Requested-With` header. Dashboard CORS permits only the configured dashboard origin. Widget CORS separately permits registered widget origins. Widget writes use origin-bound bearer sessions rather than cookies.
-- Each dashboard route resolves organization membership on the server, checks role, and scopes resource queries by organization. Widget conversations also scope by assistant and visitor. Integration tests attempt cross-tenant and cross-visitor access.
-- Zod validates request bodies. JSON bodies are limited to 16 KB. Helmet sets common HTTP security headers. Auth, widget, and general requests have rate limits.
-- Passwords are bcrypt-hashed. The OpenAI API key and session secret stay server-side. Logs include method, URL, status, and error details; cookie and authorization headers are not serialized.
+- Staff cookies are host-only, HttpOnly, SameSite=Lax, and Secure in production. Opaque session values are HMAC-hashed in MongoDB. Users can list and revoke sessions. Password reset revokes all sessions.
+- Registration requires email verification before login. Staff receive a 72-hour, single-use invitation link and set their own password. Reset and verification links expire after one hour. Links use a URL fragment so the token is not sent in HTTP request paths. No password is emailed.
+- Dashboard mutations require the configured exact Origin and `X-Requested-With`; widget bearer sessions are bound to the site origin, assistant, organization, and visitor. Membership and role checks precede tenant-scoped queries. Cross-tenant API tests run against an ephemeral real MongoDB replica set.
+- Input schemas, a 16 KB JSON limit, Helmet, and MongoDB-backed distributed request counters apply. Per-organization daily and monthly AI budgets reserve a conservative maximum before the provider call and settle measured usage afterward. Failed or timed-out provider calls consume the full reservation as uncertain cost.
+- Widget requests have durable unique client message IDs, a conversation processing lease, and a worker that retries once after failure or crash. The widget keeps a 24-hour bearer session in tab-scoped `sessionStorage` and offers a clear action. This retains chat across reloads in the same tab without persistent cross-tab tracking.
+- Owner-only export, retention configuration, and password-confirmed tenant deletion are available. Staff mutations write an audit record with actor, organization, route, time, and outcome, without request bodies.
 
-## Open risks and release gates
+## Remaining pilot and production risks
 
-1. **Customer-facing public API abuse:** IP rate limits are process-local and do not impose per-organization token budgets. Add a distributed limiter and enforce spend limits before public launch.
-2. **Staff onboarding:** an owner enters and shares a temporary password; there is no invitation, password reset, email verification, MFA, or session management UI. Replace this workflow before broad commercial use.
-3. **AI output safety:** assistant instructions are tenant-controlled, but there is no knowledge retrieval, tool execution, prompt injection evaluation, or content moderation workflow. Do not treat model output as authoritative.
-4. **Widget token and conversation lifecycle:** tokens expire after 24 hours and are not persisted. The widget polls for agent replies. Add reconnection, pagination, and longer-term identity/retention design.
-5. **Idempotency and concurrency:** client message IDs are unique within a conversation, but first-message retries may create another conversation. Concurrent messages can interleave. Add an intake idempotency record and serialized processing.
-6. **Privacy and compliance:** define retention, customer consent language, access logs, export/deletion, backups, and regional processing obligations with counsel before selling to regulated customers.
-7. **Deployment:** terminate TLS, configure exact origins and trusted proxy hops, use a secret manager, protect MongoDB with authentication and network controls, monitor failed logins and provider cost, and test backup restore.
-8. **Licensing:** third-party package notices are inventoried. Four packages lacked a standalone notice file and use a related package license or a README notice in the generated inventory; confirm applicability before redistribution. No third-party art or copied application source is included. The MongoDB server image has separate SSPL terms; see provenance.
-9. **Browser delivery:** the widget bundle is public JavaScript; use a versioned asset URL and Content Security Policy guidance for customer sites. Dynamic CORS origin lookup adds database work; measure and cache safely before high traffic.
-
-This review is an engineering assessment, not a penetration test or legal opinion.
+1. **Provider billing uncertainty:** Chat Completions usage and configured token prices produce an estimate, not an invoice. Timeout or crash may occur after a provider charge; retry can produce two provider charges. The full reservation is charged internally for each uncertain attempt. Operators must reconcile provider invoices and monitor `billingStatus=uncertain`. Changing model or price requires updating both environment prices and pilot budgets.
+2. **Invitation delivery:** SMTP credentials and sender reputation must be configured. Mail delivery failure after registration leaves an unverified account; use the resend endpoint. Existing-email cross-organization invitations are not supported. MFA and an account recovery policy are still absent.
+3. **Widget browser storage:** A same-origin site script can read its own `sessionStorage`, including the widget bearer token. Customer sites need a reviewed CSP, trusted scripts, HTTPS, and a privacy notice. A restored session is valid only for the same tab and origin; clearing site data loses it.
+4. **Retention and deletion:** The daily worker removes old conversations, messages, and widget requests. Usage and audit ledgers remain until full tenant deletion. A full tenant delete runs in one MongoDB transaction and may need a staged deletion job for large tenants. Backups retain deleted data until their retention period expires. Confirm legal hold and data subject procedures before production use.
+5. **Operational resilience:** MongoDB transactions require a replica set. Validate index creation, backup restore, worker behavior across multiple API instances, and failure injection on production-like infrastructure. The queue is MongoDB-backed; it is not a separate broker. Lease expiry can allow a second provider call after an unusually long response, with conservative uncertain charging.
+6. **AI safety:** Tenant instructions and customer messages are untrusted. No retrieval, tool execution, moderation, or prompt injection evaluation exists. Human review remains necessary for consequential answers.
+7. **Deployment:** Use TLS, exact origins, trusted proxy count, authenticated private MongoDB, a secret manager, monitored SMTP, and rate/budget alerts. Local Compose is not production hardened. This review is engineering analysis, not a penetration test or legal opinion.

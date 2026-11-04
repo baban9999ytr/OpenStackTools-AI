@@ -1,36 +1,24 @@
-# Architecture
+# Pilot architecture
 
-## System boundary
+The API is Express 5 and TypeScript; the dashboard and embeddable widget are React. MongoDB stores all tenant and queue state. OpenAI is called only from the API. A fake `AIResponder` is injected into integration tests. Website channel only; WhatsApp, Instagram, Telegram, and Messenger adapters remain future interfaces, not implementations.
 
-The API is an Express 5 TypeScript service. MongoDB stores organizations, users, memberships, assistants, conversations, messages, sessions, and usage events. React serves the business dashboard and a separately bundled website widget. The OpenAI key stays in the API process. `src/services/ai.ts` defines the responder contract and isolates the provider call from HTTP handlers. Tests inject a fake responder through `createApp`.
+## Message path
 
-```
-Website -> embed.js -> /api/widget -> widget session -> conversation service -> AI responder
-Staff browser -> dashboard -> /api/auth + /api/organizations -> membership authorization
-                                             |                  |
-                                          MongoDB          OpenAI API
-```
+A website origin registered on an assistant exchanges its public key for a 24-hour, origin-bound visitor bearer session. The widget stores that session in tab-scoped `sessionStorage`, and submits a UUID per message. MongoDB uniquely indexes `(organizationId, assistantId, visitorId, clientMessageId)`, including first messages. A transaction creates the initial conversation and request together. The request queue serializes processing through a conversation lease. A worker recovers expired leases, retries once, and records an uncertain budget charge for any attempt whose provider cost cannot be confirmed. The client polls request status and conversation messages after an accepted/queued response.
 
-The website widget is script-based so a browser request carries the actual host page `Origin`. Assistants explicitly list allowed origins. The API checks this origin before issuing a widget session; CORS is also restricted to the dashboard or origins configured for an active assistant. The widget token is random, stored only as an HMAC hash, scoped to organization/assistant/visitor/origin, and expires in 24 hours. It is held in widget memory rather than persisted in browser storage. Reloading starts a fresh visitor session.
+Before calling OpenAI, the API reserves a conservative maximum against UTC daily and monthly organization budget windows in a MongoDB transaction. Both windows count spent plus reserved amounts. After success, usage and estimated cost settle the reservation; after provider uncertainty, the full reservation is charged. Limits and per-token prices are configured server-side. A separate MongoDB counter collection enforces distributed request rate limits across API instances.
 
-## Tenant boundary
+## Staff path and tenant boundary
 
-Every organization dashboard route requires an authenticated user and a `Membership` lookup for the route's organization ID. Every assistant, conversation, message, and usage query includes `organizationId`. Widget requests derive organization and assistant IDs from a server-side widget session; clients cannot choose them. Conversation reads additionally filter visitor ID. `owner`, `admin`, `agent`, and `viewer` roles gate management actions. Cross-tenant API and widget tests run against a real MongoDB replica set.
+An owner registers and verifies an email. Owner-created invitations are emailed as single-use 72-hour tokens; an invitee sets their own password. Password reset tokens expire after one hour and revoke sessions. Staff sessions are opaque cookies. Every organization route validates the authenticated membership and role; queries include the organization ID. Widget conversation reads additionally require assistant and visitor IDs from the widget session. Owner-only export, retention settings, and confirmed tenant deletion are scoped to the organization. Staff mutations create audit events without request bodies.
 
 ## Current REST surface
 
-- `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`
-- `GET /api/organizations/:organizationId`, `GET/POST /api/organizations/:organizationId/members`
-- `GET/POST /api/organizations/:organizationId/assistants`, `PATCH /api/organizations/:organizationId/assistants/:assistantId`
-- `GET /api/organizations/:organizationId/conversations`, `GET /api/organizations/:organizationId/conversations/:conversationId/messages`, `PATCH .../status`, `POST .../reply`
-- `GET /api/organizations/:organizationId/usage`
-- `POST /api/widget/sessions`, `POST /api/widget/messages`, `GET /api/widget/conversations/:conversationId/messages`
-- `GET /health/live`, `GET /health/ready`
+- Auth: `/api/auth/register`, `/verify-email`, `/resend-verification`, `/login`, `/request-password-reset`, `/reset-password`, `/accept-invitation`, `/me`, `/sessions`, `/logout`.
+- Organizations: members, invitations, assistants, conversations, usage, budgets, retention, paged export, and tenant deletion under `/api/organizations/:organizationId`.
+- Widget: `/api/widget/sessions`, `/sessions/current`, `/messages`, `/requests/:requestId`, and `/conversations/:conversationId/messages`.
+- Health: `/health/live`, `/health/ready`.
 
-## Future channel adapter contract
+## Future adapters
 
-Future WhatsApp, Instagram, Telegram, and Messenger adapters should implement `verifyWebhook(rawBody, headers)`, `normalizeIncoming(event)`, `send(outgoing)`, and `mapDeliveryStatus(event)`, plus a capability descriptor for templates, attachments, reply windows, and rate limits. Normalize to a tenant-scoped message envelope before dispatching through the shared conversation/AI service. Store provider event IDs with unique indexes, acknowledge webhooks quickly, queue work, and use an outbox for retries. None of these adapters or queues are implemented yet. Official API access, permissions, and costs must be checked when each channel is scheduled.
-
-## Intentional scope limits
-
-Only website conversations exist. There is no billing, self-service invitation, knowledge retrieval, model fallback, cross-channel identity linking, or platform administration. Usage events record provider token counts but the dashboard only totals its latest 100 events and no budget is enforced. The AI request is synchronous. These limits are tracked in the roadmap.
+A future channel adapter should verify provider webhook signatures on the raw body, normalize inbound messages, emit outbound messages, map delivery status, and declare channel capabilities. Provider event IDs need tenant-scoped unique indexes and queued idempotent processing. These adapters are not in the pilot.

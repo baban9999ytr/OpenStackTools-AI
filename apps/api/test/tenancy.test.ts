@@ -438,6 +438,24 @@ test("daily and monthly budgets reject concurrent AI requests across visitors", 
     }),
     1,
   );
+  const monthlyOnly = await request(app)
+    .patch(`/api/organizations/${orgB}/budgets`)
+    .set(dashboardHeaders)
+    .set("Cookie", cookieB)
+    .send({ dailyUsd: "1", monthlyUsd: "1" });
+  assert.equal(monthlyOnly.status, 200);
+  await BudgetWindow.updateOne({ organizationId: orgB, kind: "month" }, { $set: { spentMicros: 1_000_000, limitMicros: 1_000_000 } });
+  const monthlySession = await request(app)
+    .post("/api/widget/sessions")
+    .set(websiteHeaders)
+    .send({ publicKey: assistant.body.assistant.publicKey });
+  const blockedMonthly = await request(slowApp)
+    .post("/api/widget/messages")
+    .set(websiteHeaders)
+    .set("Authorization", `Bearer ${monthlySession.body.token}`)
+    .send({ text, clientMessageId: crypto.randomUUID() });
+  assert.equal(blockedMonthly.status, 402);
+  assert.equal(calls, 1);
 });
 
 test("first-message idempotency and serialized replies survive concurrent POSTs", async () => {

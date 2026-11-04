@@ -1,13 +1,25 @@
 # Deployment preparation
 
-This repository has not been deployed. Docker Compose is for local development only. A production deployment needs separate API and web builds, TLS termination, a managed MongoDB replica set with authentication, secret management, backups, monitoring, and a controlled release pipeline.
+No production deployment is included. Local Compose runs MongoDB 8 as a single-node replica set, Mailpit for test email, API, and web. Run `docker compose up --build` after setting `apps/api/.env`; Mailpit is at `http://localhost:8025`. Never use Mailpit as a production mail server.
 
-1. Build with Node 22 LTS using `npm ci`, `npm run typecheck`, `npm test`, `npm run build`, and `npm audit --audit-level=low`.
-2. Provision MongoDB as a replica set. Restrict network access. Run schema index creation under controlled credentials and test a restore.
-3. Supply `SESSION_SECRET`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `MONGODB_URL`, `DASHBOARD_ORIGIN`, `PORT`, `COOKIE_SECURE=true`, and a precise `TRUST_PROXY` value through the deployment secret/config system.
-4. Serve the dashboard and `embed.js` over HTTPS. Set `DASHBOARD_ORIGIN` to the exact dashboard origin. Configure customer website origins on each assistant, with no wildcards. Publish the API on HTTPS with CORS checks intact.
-5. Ensure the API health endpoints are monitored. Add provider error, latency, token-spend, queue, and failed-login alerts before scaling.
-6. Add distributed rate limits and tenant budgets; run load, security, backup-restore, and browser tests before opening the public widget widely.
-7. Distribute `docs/THIRD_PARTY_LICENSES.md` with the application and confirm the four related-package notice mappings. Review service terms for OpenAI and future channels.
+## Required configuration and release sequence
 
-The dashboard uses cookies with SameSite=Lax. Prefer a same-site API and dashboard deployment; cross-site cookie architecture would need revised cookie and CSRF controls. Website widgets use a separate bearer session and do not depend on dashboard cookies.
+1. Use Node 22 or 24 LTS. Run `npm ci`, `npm run typecheck`, `npm test`, `npm run test:browser -w apps/web`, `npm run build`, and `npm audit --audit-level=low`.
+2. Configure an authenticated, private MongoDB replica set. Back up before schema changes. Run `npm run migrate:budgets -w apps/api` once for organizations created before the pilot fields existed. This fills missing daily/monthly budgets and 30-day retention; it does not overwrite configured values. Verify indexes and migration counts.
+3. Provide `MONGODB_URL`, `SESSION_SECRET` (at least 32 random characters), `OPENAI_API_KEY`, `OPENAI_MODEL`, `DASHBOARD_ORIGIN`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, and optional SMTP credentials through a secret manager. Set `DEFAULT_DAILY_BUDGET_USD`, `DEFAULT_MONTHLY_BUDGET_USD`, and both model token prices from current provider pricing. Keep `COOKIE_SECURE=true`, set exact `TRUST_PROXY`, and serve API, dashboard, and widget over HTTPS.
+4. Validate email sending/receiving, verification, invitation, and reset with the pilot business. Register exact website origins for the assistant. Review site CSP to allow the versioned widget script and API origin. The public assistant key is an identifier, not a secret.
+5. Monitor `/health/live` and `/health/ready`, rate-limit 429s, budget 402s, queue depth/age, `uncertain` usage, SMTP failures, provider latency/errors, failed authentication, MongoDB storage, retention failures, and audit write failures. Alert on daily and monthly spend approaching limits. Review provider invoices against internal estimates.
+
+## Backup and restoration runbook
+
+- Take encrypted, access-controlled replica-set snapshots or `mongodump` backups on a schedule appropriate to the pilot's recovery point objective. Include database indexes and configuration in the restore plan. Keep backup retention explicit; deleted tenant data remains in backups until expiration.
+- Rehearse restoration into an isolated, nonproduction replica set with different credentials and no outbound OpenAI or SMTP access. Restore a chosen snapshot with `mongorestore`, check `/health/ready`, collection counts, indexes, membership isolation, and a sample conversation. Record recovery time and point. Never restore a test snapshot over the live database.
+- Restrict restore access to named operators, log every backup/restore action, and rotate credentials after suspected exposure. Verify encryption and restore ability periodically; a backup job succeeding is insufficient evidence of recoverability.
+
+## Pilot operations
+
+Owner export is paginated: `GET /api/organizations/:id/export/:kind?after=<last-id>` for `organization`, `members`, `assistants`, `conversations`, `messages`, `usage`, `audits`, `requests`, `widgetSessions`, and `budgets`. Each page contains at most 100 records and `next`; collect pages until `next` is null. Store exports securely because messages and user emails are sensitive. Widget token hashes are excluded.
+
+Owner retention: `PATCH /api/organizations/:id/retention` with `{ "days": 30 }` (1–365). The daily worker deletes conversations inactive beyond the configured period and their messages and requests. Usage and audit ledgers remain until tenant deletion. Full tenant deletion: `DELETE /api/organizations/:id/tenant` with exact `organizationName` and owner `password`; take an export and backup first. It removes organization-scoped data, memberships, and orphaned accounts in a MongoDB transaction. Large tenants need a staged deletion design before scale.
+
+Keep `docs/THIRD_PARTY_LICENSES.md` with distributed software and review package, MongoDB server, OpenAI, and future channel terms. The dashboard cookie design assumes a same-site API; changing that topology requires a new CSRF and cookie review.

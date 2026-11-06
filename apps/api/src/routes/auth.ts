@@ -20,6 +20,7 @@ import { newToken, tokenHash } from "../services/tokens.js";
 import { sendAccountMail } from "../services/mail.js";
 import { env } from "../config/env.js";
 import type { Role } from "../middleware/security.js";
+import { logger } from "../config/logger.js";
 
 const router = Router();
 const registerInput = z.strictObject({
@@ -53,7 +54,7 @@ export const createAccountToken = async (
   } = {},
 ) => {
   const token = newToken();
-  await AccountToken.create({
+  const record = await AccountToken.create({
     tokenHash: tokenHash(token),
     purpose,
     email: emailAddress,
@@ -62,7 +63,12 @@ export const createAccountToken = async (
       Date.now() + (purpose === "invite" ? 72 : 1) * 60 * 60 * 1000,
     ),
   });
-  await sendAccountMail({ to: emailAddress, purpose, token });
+  try {
+    await sendAccountMail({ to: emailAddress, purpose, token });
+  } catch {
+    await AccountToken.deleteOne({ _id: record._id });
+    throw new Error("Account email delivery failed");
+  }
 };
 const consume = async (
   purpose: "verify" | "reset" | "invite",
@@ -127,7 +133,13 @@ router.post(
       await session.endSession();
     }
     if (!userId || !organizationId) throw new Error("Registration failed");
-    await createAccountToken("verify", emailAddress, { userId });
+    try {
+      await createAccountToken("verify", emailAddress, { userId });
+    } catch {
+      logger.warn({ mailPurpose: "verify" }, "Account email unavailable");
+      res.status(503).json({ error: "Email temporarily unavailable; request a new verification link later" });
+      return;
+    }
     res
       .status(201)
       .json({
@@ -174,8 +186,13 @@ router.post(
       email: req.body.email,
       emailVerifiedAt: { $exists: false },
     });
-    if (user)
-      await createAccountToken("verify", user.email, { userId: user._id });
+    if (user) {
+      try {
+        await createAccountToken("verify", user.email, { userId: user._id });
+      } catch {
+        logger.warn({ mailPurpose: "verify" }, "Account email unavailable");
+      }
+    }
     res.json({ ok: true });
   },
 );
@@ -206,8 +223,13 @@ router.post(
       email: req.body.email,
       emailVerifiedAt: { $exists: true },
     });
-    if (user)
-      await createAccountToken("reset", user.email, { userId: user._id });
+    if (user) {
+      try {
+        await createAccountToken("reset", user.email, { userId: user._id });
+      } catch {
+        logger.warn({ mailPurpose: "reset" }, "Account email unavailable");
+      }
+    }
     res.json({ ok: true });
   },
 );

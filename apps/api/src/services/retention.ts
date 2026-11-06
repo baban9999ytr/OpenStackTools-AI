@@ -6,7 +6,7 @@ import {
   WidgetRequest,
   WidgetSession,
 } from "../models/index.js";
-import { logger } from "../config/logger.js";
+import { logger, safeError } from "../config/logger.js";
 
 export const runRetention = async (now = new Date()) => {
   for await (const organization of Organization.find().cursor()) {
@@ -61,7 +61,7 @@ export const runRetention = async (now = new Date()) => {
 export const startRetentionWorker = () => {
   const tick = () =>
     void runRetention().catch((error) =>
-      logger.error({ err: error }, "Retention worker failed"),
+      logger.error({ failure: safeError(error) }, "Retention worker failed"),
     );
   tick();
   const timer = setInterval(tick, 24 * 60 * 60 * 1000);

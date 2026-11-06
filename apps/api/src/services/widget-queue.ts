@@ -7,7 +7,7 @@ import {
   WidgetRequest,
   WidgetSession,
 } from "../models/index.js";
-import type { AIResponder, Turn } from "./ai.js";
+import { providerFailurePolicy, type AIResponder, type Turn } from "./ai.js";
 import {
   BudgetExceeded,
   maximumReservationMicros,
@@ -16,7 +16,7 @@ import {
   settleWindows,
 } from "./budget.js";
 import { env } from "../config/env.js";
-import { logger } from "../config/logger.js";
+import { logger, safeError } from "../config/logger.js";
 
 const LEASE_MS = 120_000;
 const MAX_ATTEMPTS = 2;
@@ -161,6 +161,7 @@ const finalizeFailure = async (
   requestId: mongoose.Types.ObjectId,
   errorCode: string,
   retry: boolean,
+  uncertain = true,
 ) => {
   const session = await mongoose.startSession();
   try {
@@ -173,8 +174,12 @@ const finalizeFailure = async (
       if (request.reservedMicros > 0) {
         // An attempted provider call has uncertain cost on timeout or crash. Charge
         // the whole reservation so a second attempt cannot exceed the budget.
-        await settleWindows(request, request.reservedMicros, session);
-        await UsageEvent.create(
+        await settleWindows(
+          request,
+          uncertain ? request.reservedMicros : 0,
+          session,
+        );
+        if (uncertain) await UsageEvent.create(
           [
             {
               organizationId: request.organizationId,
@@ -411,11 +416,17 @@ export const processWidgetRequest = async (
     if (error instanceof BudgetExceeded)
       await finalizeFailure(requestId, "budget_exhausted", false);
     else {
-      logger.error(
-        { err: error, requestId: requestId.toString() },
+      const policy = providerFailurePolicy(error);
+      logger.warn(
+        { requestId: requestId.toString(), failureCode: policy.code },
         "Widget request failed",
       );
-      await finalizeFailure(requestId, "provider_or_processing_failure", true);
+      await finalizeFailure(
+        requestId,
+        policy.code,
+        policy.retry,
+        policy.uncertain,
+      );
     }
   }
 };
@@ -428,7 +439,11 @@ export const recoverExpiredRequests = async () => {
     .limit(20)
     .lean();
   for (const request of expired)
-    await finalizeFailure(request._id, "lease_expired", true);
+    await finalizeFailure(
+      request._id,
+      "lease_expired",
+      request.reservedMicros === 0,
+    );
 };
 export const processPendingRequests = async (respond: AIResponder) => {
   await recoverExpiredRequests();
@@ -447,7 +462,7 @@ export const startWidgetWorker = (respond: AIResponder) => {
     try {
       await processPendingRequests(respond);
     } catch (error) {
-      logger.error({ err: error }, "Widget worker failed");
+      logger.error({ failure: safeError(error) }, "Widget worker failed");
     } finally {
       busy = false;
     }

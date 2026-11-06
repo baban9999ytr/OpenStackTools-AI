@@ -22,8 +22,8 @@ type Saved = {
 const css = `${widgetBrandCss}\n:host{font-family:var(--ost-font-sans);color:var(--ost-text)}*{box-sizing:border-box}.ost-launch{position:fixed;right:24px;bottom:24px;z-index:2147483647;border:0;border-radius:999px;background:var(--ost-accent);color:var(--ost-accent-text);padding:16px 20px;font:700 15px var(--ost-font-sans);box-shadow:0 10px 28px #09090b50;cursor:pointer}.ost-panel{position:fixed;right:24px;bottom:82px;z-index:2147483647;width:min(370px,calc(100vw - 32px));height:min(550px,calc(100vh - 110px));display:flex;flex-direction:column;background:var(--ost-surface);color:var(--ost-text);border:1px solid var(--ost-border);border-radius:12px;box-shadow:0 18px 60px #09090b50;overflow:hidden}.ost-head{background:var(--ost-surface-soft);border-bottom:1px solid var(--ost-border);padding:17px 20px;font-weight:700;display:flex;gap:12px;justify-content:space-between;align-items:center}.ost-head small{display:block;color:var(--ost-muted);font-weight:400;margin-top:3px}.ost-head button{background:transparent;color:var(--ost-text);border:1px solid var(--ost-border);border-radius:4px;padding:4px;font:inherit;cursor:pointer}.ost-messages{flex:1;overflow:auto;padding:16px;background:var(--ost-page)}.ost-message{max-width:85%;padding:9px 12px;margin:8px 0;border-radius:8px;background:var(--ost-surface-soft);white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}.ost-message.customer{margin-left:auto;background:var(--ost-accent-subtle)}.ost-form{display:flex;gap:8px;padding:12px;background:var(--ost-surface);border-top:1px solid var(--ost-border)}.ost-form input{flex:1;min-width:0;padding:10px;border:1px solid var(--ost-border);border-radius:8px;background:var(--ost-surface);color:var(--ost-text);font:inherit}.ost-form button{border:0;border-radius:8px;background:var(--ost-accent);color:var(--ost-accent-text);padding:10px 13px;font:700 13px var(--ost-font-sans);cursor:pointer}.ost-form button:disabled{opacity:.6}.ost-error{color:var(--ost-danger);padding:0 14px;font-size:13px}.ost-state{padding:0 14px;font-size:13px}.ost-retry{margin:0 14px 8px;background:var(--ost-surface);color:var(--ost-accent);border:1px solid var(--ost-border);border-radius:4px;padding:6px;cursor:pointer}:focus-visible{outline:2px solid var(--ost-focus);outline-offset:2px}`;
 
 const labels = {
-  en: { assistant: "AI assistant", handoff: "A team member will reply here.", closed: "This conversation is closed.", sending: "Sending message…", waiting: "Waiting for a reply…", failed: "The assistant could not reply. Please try a new message.", uncertain: "Message status is uncertain. Retry uses the same message ID.", sendError: "Could not send message", connectionError: "Connection failed", lost: "Connection lost", startError: "Could not start chat", close: "Close chat", launch: "Chat with us", chat: "Business chat", privacy: "Messages are shared with this business.", clearLabel: "Clear this chat session", clear: "Clear chat", empty: "How can we help?", retry: "Retry message safely", input: "Your message", placeholder: "Write a message…", send: "Send" },
-  tr: { assistant: "Yapay zekâ asistanı", handoff: "Bir ekip üyesi buradan yanıt verecek.", closed: "Bu görüşme kapandı.", sending: "Mesaj gönderiliyor…", waiting: "Yanıt bekleniyor…", failed: "Asistan yanıt veremedi. Yeni bir mesaj deneyin.", uncertain: "Mesajın durumu belirsiz. Yeniden deneme aynı mesaj kimliğini kullanır.", sendError: "Mesaj gönderilemedi", connectionError: "Bağlantı kurulamadı", lost: "Bağlantı koptu", startError: "Sohbet başlatılamadı", close: "Sohbeti kapat", launch: "Bizimle sohbet edin", chat: "İşletme sohbeti", privacy: "Mesajlarınız bu işletmeyle paylaşılır.", clearLabel: "Bu sohbet oturumunu temizle", clear: "Sohbeti temizle", empty: "Nasıl yardımcı olabiliriz?", retry: "Mesajı güvenle yeniden dene", input: "Mesajınız", placeholder: "Mesaj yazın…", send: "Gönder" },
+  en: { assistant: "AI assistant", handoff: "A team member will reply here.", closed: "This conversation is closed.", sending: "Sending message…", waiting: "Waiting for a reply…", failed: "The assistant could not reply. Please try a new message.", uncertain: "Message status is uncertain. Retry uses the same message ID.", terminal: "No AI reply was sent. You can start a new message.", sendError: "Could not send message", connectionError: "Connection failed", lost: "Connection lost", startError: "Could not start chat", close: "Close chat", launch: "Chat with us", chat: "Business chat", privacy: "Messages are shared with this business.", clearLabel: "Clear this chat session", clear: "Clear chat", empty: "How can we help?", retry: "Retry message safely", input: "Your message", placeholder: "Write a message…", send: "Send" },
+  tr: { assistant: "Yapay zekâ asistanı", handoff: "Bir ekip üyesi buradan yanıt verecek.", closed: "Bu görüşme kapandı.", sending: "Mesaj gönderiliyor…", waiting: "Yanıt bekleniyor…", failed: "Asistan yanıt veremedi. Yeni bir mesaj deneyin.", uncertain: "Mesajın durumu belirsiz. Yeniden deneme aynı mesaj kimliğini kullanır.", terminal: "Yapay zekâ yanıtı gönderilmedi. Yeni bir mesaj yazabilirsiniz.", sendError: "Mesaj gönderilemedi", connectionError: "Bağlantı kurulamadı", lost: "Bağlantı koptu", startError: "Sohbet başlatılamadı", close: "Sohbeti kapat", launch: "Bizimle sohbet edin", chat: "İşletme sohbeti", privacy: "Mesajlarınız bu işletmeyle paylaşılır.", clearLabel: "Bu sohbet oturumunu temizle", clear: "Sohbeti temizle", empty: "Nasıl yardımcı olabiliriz?", retry: "Mesajı güvenle yeniden dene", input: "Mesajınız", placeholder: "Mesaj yazın…", send: "Gönder" },
 } as const;
 
 export function Widget({
@@ -119,16 +119,16 @@ export function Widget({
       else setStatus(t.waiting);
       await refresh(next);
     } catch (caught) {
-      if (
+      const terminal =
         caught instanceof Error &&
         (caught.message.includes("budget exhausted") ||
-          caught.message.includes("temporarily unavailable"))
-      )
+          caught.message.includes("temporarily unavailable"));
+      if (terminal)
         save({ ...state, pending: undefined });
       setError(
         caught instanceof Error ? caught.message : t.sendError,
       );
-      setStatus(t.uncertain);
+      setStatus(terminal ? t.terminal : t.uncertain);
     } finally {
       setBusy(false);
     }

@@ -1,6 +1,6 @@
 import type { RequestHandler } from "express";
 import { AuditEvent } from "../models/index.js";
-import { logger } from "../config/logger.js";
+import { logger, safeError } from "../config/logger.js";
 
 export const auditStaffMutation: RequestHandler = (req, res, next) => {
   if (
@@ -21,7 +21,7 @@ export const auditStaffMutation: RequestHandler = (req, res, next) => {
         target: req.path,
         result: res.statusCode,
       }).catch((error) =>
-        logger.error({ err: error }, "Staff audit write failed"),
+        logger.error({ failure: safeError(error) }, "Staff audit write failed"),
       );
     });
   }

@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { createApp } from "./app.js";
 import { env } from "./config/env.js";
-import { logger } from "./config/logger.js";
+import { logger, safeError } from "./config/logger.js";
 import { startWidgetWorker } from "./services/widget-queue.js";
 import { openAIResponder } from "./services/ai.js";
 import { startRetentionWorker } from "./services/retention.js";
@@ -12,6 +12,10 @@ try {
   const server = createApp().listen(env.port, () =>
     logger.info({ port: env.port }, "API listening"),
   );
+  server.requestTimeout = 45_000;
+  server.headersTimeout = 10_000;
+  server.keepAliveTimeout = 5_000;
+  server.timeout = 65_000;
   const shutdown = () => {
     stopWorker();
     stopRetention();
@@ -23,6 +27,6 @@ try {
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
 } catch (error) {
-  logger.fatal({ err: error }, "Startup failed");
+  logger.fatal({ failure: safeError(error) }, "Startup failed");
   process.exitCode = 1;
 }

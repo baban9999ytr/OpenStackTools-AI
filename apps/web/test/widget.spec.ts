@@ -76,9 +76,11 @@ test("widget restores messages after reload and retries one idempotent request",
   await expect(shadow.getByText("Pilot answer")).toBeVisible();
   expect(sentIds).toHaveLength(2);
   expect(sentIds[0]).toBe(sentIds[1]);
+  messages[1]!.text = '<img src=x onerror=alert(1)> Pilot answer';
   await page.reload();
   await shadow.getByRole("button", { name: "Chat with us" }).click();
   await expect(shadow.getByText("Pilot answer")).toBeVisible();
+  await expect(shadow.locator("img")).toHaveCount(0);
   await shadow.getByRole("button", { name: "Clear this chat session" }).click();
   expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
 });
@@ -98,4 +100,22 @@ test("widget follows Turkish page language and explicit dark theme", async ({ pa
   await expect(host.getByText("Mesajlarınız bu işletmeyle paylaşılır.")).toBeVisible();
   await expect(host.getByRole("textbox", { name: "Mesajınız" })).toBeVisible();
   await expect(host.getByRole("button", { name: "Gönder" })).toBeVisible();
+});
+
+test("terminal provider failure allows a new message without unsafe replay", async ({ page }) => {
+  await page.route("**/pilot-page.html", route => route.fulfill({
+    contentType: "text/html",
+    body: '<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body><script src="http://127.0.0.1:5173/embed.js" data-ost-assistant="ost_test" data-ost-api="http://127.0.0.1:5173"></script></body></html>',
+  }));
+  await page.route("**/api/widget/sessions", route => route.fulfill({ status: 201, json: { token: "test-token", expiresAt: new Date(Date.now() + 60_000).toISOString(), assistant: { name: "Pilot helper" } } }));
+  await page.route("**/api/widget/sessions/current", route => route.fulfill({ json: { assistant: { name: "Pilot helper" }, conversationId: null } }));
+  await page.route("**/api/widget/messages", route => route.fulfill({ status: 502, json: { error: "Assistant temporarily unavailable" } }));
+  await page.goto("http://127.0.0.1:5173/pilot-page.html");
+  const host = page.locator("[id^=openstacktools-widget-]");
+  await host.getByRole("button", { name: "Chat with us" }).click();
+  await host.getByRole("textbox", { name: "Your message" }).fill("Hello");
+  await host.getByRole("button", { name: "Send" }).click();
+  await expect(host.getByRole("status")).toContainText("No AI reply was sent");
+  await expect(host.getByRole("button", { name: "Retry message safely" })).toHaveCount(0);
+  await expect(host.getByRole("textbox", { name: "Your message" })).toBeEnabled();
 });

@@ -20,8 +20,13 @@ let replset: MongoMemoryReplSet;
 const { createApp } = await import("../src/app.js");
 const { setMailSenderForTests } = await import("../src/services/mail.js");
 const { accountLink } = await import("../src/services/mail.js");
+const { accountMailContent } = await import("../src/services/mail.js");
+const { safeError } = await import("../src/config/logger.js");
+const { tokenHash } = await import("../src/services/tokens.js");
 const mailed = new Map<string, string>();
+let mailFails = false;
 setMailSenderForTests(async ({ to, token }) => {
+  if (mailFails) throw new Error("sandbox SMTP outage with sensitive detail");
   mailed.set(to, token);
 });
 const { distributedLimit } = await import("../src/middleware/limits.js");
@@ -38,6 +43,8 @@ const {
   Organization,
   AuditEvent,
   RateCounter,
+  AccountToken,
+  Session,
 } = await import("../src/models/index.js");
 const app = createApp(async () => ({
   text: "Test answer",
@@ -84,6 +91,10 @@ test("register separate organizations and reject invalid input", async () => {
   );
   assert.equal(accountLink("reset", "reset-token"), "http://localhost:5173/app/#reset=reset-token");
   assert.equal(accountLink("invite", "invite-token"), "http://localhost:5173/app/#invite=invite-token");
+  const content = accountMailContent("reset", "token <&\"");
+  assert.match(content.text, /\/app\/#reset=token%20%3C%26%22/);
+  assert.doesNotMatch(content.html, /token <&"/);
+  assert.equal(JSON.stringify(safeError(new Error("secret customer message"))).includes("secret customer message"), false);
   const invalid = await request(app)
     .post("/api/auth/register")
     .set(dashboardHeaders)
@@ -94,6 +105,8 @@ test("register separate organizations and reject invalid input", async () => {
       password: "short",
     });
   assert.equal(invalid.status, 422);
+  assert.match(invalid.headers["x-request-id"] ?? "", /^[0-9a-f-]{36}$/);
+  assert.equal(invalid.headers["cache-control"], "no-store");
   const a = await request(app)
     .post("/api/auth/register")
     .set(dashboardHeaders)
@@ -358,6 +371,9 @@ test("staff role checks, login and logout", async () => {
     ).status,
     200,
   );
+  assert.equal((await request(app).get(`/api/organizations/${orgA}/budgets`).set("Cookie", viewerCookie)).status, 403);
+  assert.equal((await request(app).get(`/api/organizations/${orgA}/usage`).set("Cookie", viewerCookie)).status, 403);
+  assert.equal((await request(app).get(`/api/organizations/${orgB}/budgets`).set("Cookie", viewerCookie)).status, 403);
   assert.equal(
     (
       await request(app)
@@ -536,7 +552,7 @@ test("first-message idempotency and serialized replies survive concurrent POSTs"
   assert.equal(calls, 3);
 });
 
-test("failed provider attempt is conservatively charged and retried once", async () => {
+test("ambiguous provider failure is charged conservatively and never replayed", async () => {
   const started = await request(app)
     .post("/api/widget/sessions")
     .set(websiteHeaders)
@@ -544,8 +560,7 @@ test("failed provider attempt is conservatively charged and retried once", async
   let attempts = 0;
   const responder = async () => {
     attempts++;
-    if (attempts === 1) throw new Error("provider timeout");
-    return { text: "Recovered", inputTokens: 8, outputTokens: 3 };
+    throw new Error("provider timeout with sensitive details");
   };
   const retryApp = createApp(responder);
   const clientMessageId = crypto.randomUUID();
@@ -554,12 +569,14 @@ test("failed provider attempt is conservatively charged and retried once", async
     .set(websiteHeaders)
     .set("Authorization", `Bearer ${started.body.token}`)
     .send({ text: "Retry me", clientMessageId });
-  assert.equal(first.status, 202);
+  assert.equal(first.status, 502);
+  assert.equal(first.body.error, "Assistant temporarily unavailable");
+  assert.equal(JSON.stringify(first.body).includes("sensitive details"), false);
   await processPendingRequests(responder);
   const queued = await WidgetRequest.findOne({ clientMessageId });
-  assert.equal(queued?.status, "completed");
-  assert.equal(attempts, 2);
-  assert.equal(await Message.countDocuments({ requestId: queued?._id }), 2);
+  assert.equal(queued?.status, "failed");
+  assert.equal(attempts, 1);
+  assert.equal(await Message.countDocuments({ requestId: queued?._id }), 1);
   assert.equal(
     await UsageEvent.countDocuments({
       requestId: queued?._id,
@@ -572,8 +589,64 @@ test("failed provider attempt is conservatively charged and retried once", async
       requestId: queued?._id,
       billingStatus: "measured",
     }),
-    1,
+    0,
   );
+});
+
+test("provider 429 is retried once without uncertain billing", async () => {
+  const started = await request(app)
+    .post("/api/widget/sessions")
+    .set(websiteHeaders)
+    .send({ publicKey });
+  let attempts = 0;
+  const responder = async () => {
+    attempts++;
+    if (attempts === 1)
+      throw Object.assign(new Error("provider rate limit"), { status: 429 });
+    return { text: "Recovered", inputTokens: 8, outputTokens: 3 };
+  };
+  const retryApp = createApp(responder);
+  const clientMessageId = crypto.randomUUID();
+  const first = await request(retryApp)
+    .post("/api/widget/messages")
+    .set(websiteHeaders)
+    .set("Authorization", `Bearer ${started.body.token}`)
+    .send({ text: "Retry after rate limit", clientMessageId });
+  assert.equal(first.status, 202);
+  await processPendingRequests(responder);
+  const queued = await WidgetRequest.findOne({ clientMessageId });
+  assert.equal(queued?.status, "completed");
+  assert.equal(attempts, 2);
+  assert.equal(await UsageEvent.countDocuments({ requestId: queued?._id, billingStatus: "uncertain" }), 0);
+  assert.equal(await UsageEvent.countDocuments({ requestId: queued?._id, billingStatus: "measured" }), 1);
+});
+
+test("unavailable model returns a generic error without replay or cost", async () => {
+  const started = await request(app)
+    .post("/api/widget/sessions")
+    .set(websiteHeaders)
+    .send({ publicKey });
+  let attempts = 0;
+  const providerApp = createApp(async () => {
+    attempts++;
+    throw Object.assign(new Error("model identifier is private"), { status: 404 });
+  });
+  const clientMessageId = crypto.randomUUID();
+  const result = await request(providerApp)
+    .post("/api/widget/messages")
+    .set(websiteHeaders)
+    .set("Authorization", `Bearer ${started.body.token}`)
+    .send({ text: "Can you answer?", clientMessageId });
+  assert.equal(result.status, 502);
+  assert.equal(JSON.stringify(result.body).includes("model identifier"), false);
+  await processPendingRequests(async () => {
+    attempts++;
+    throw new Error("Unexpected replay");
+  });
+  const queued = await WidgetRequest.findOne({ clientMessageId });
+  assert.equal(queued?.status, "failed");
+  assert.equal(attempts, 1);
+  assert.equal(await UsageEvent.countDocuments({ requestId: queued?._id }), 0);
 });
 
 test("invitation is single use and password reset revokes sessions", async () => {
@@ -652,6 +725,45 @@ test("invitation is single use and password reset revokes sessions", async () =>
     ).status,
     200,
   );
+  const expiredToken = "expired-reset-link-token-at-least-32-chars";
+  await AccountToken.create({
+    tokenHash: tokenHash(expiredToken),
+    purpose: "reset",
+    email: "agent@example.test",
+    expiresAt: new Date(Date.now() - 1000),
+  });
+  await RateCounter.deleteMany({});
+  assert.equal((await request(app).post("/api/auth/reset-password").set(dashboardHeaders).send({ token: expiredToken, password: "another-secure-password-123" })).status, 400);
+});
+
+test("SMTP outage does not reveal reset account existence or leave usable links", async () => {
+  await RateCounter.deleteMany({});
+  const before = await AccountToken.countDocuments({ purpose: "reset", email: "alice@example.test" });
+  mailFails = true;
+  try {
+    const known = await request(app)
+      .post("/api/auth/request-password-reset")
+      .set(dashboardHeaders)
+      .send({ email: "alice@example.test" });
+    const unknown = await request(app)
+      .post("/api/auth/request-password-reset")
+      .set(dashboardHeaders)
+      .send({ email: "nobody@example.test" });
+    assert.equal(known.status, 200);
+    assert.equal(unknown.status, 200);
+    assert.deepEqual(known.body, unknown.body);
+    assert.equal(await AccountToken.countDocuments({ purpose: "reset", email: "alice@example.test" }), before);
+    const invite = await request(app)
+      .post(`/api/organizations/${orgA}/invitations`)
+      .set(dashboardHeaders)
+      .set("Cookie", cookieA)
+      .send({ email: "offline@example.test", role: "viewer" });
+    assert.equal(invite.status, 503);
+    assert.equal(JSON.stringify(invite.body).includes("sensitive detail"), false);
+    assert.equal(await AccountToken.countDocuments({ purpose: "invite", email: "offline@example.test" }), 0);
+  } finally {
+    mailFails = false;
+  }
 });
 
 test("owner export is tenant scoped and retention removes expired conversations", async () => {
@@ -785,4 +897,23 @@ test("owner can delete only their own tenant with password confirmation", async 
   );
   assert.equal(await Organization.exists({ _id: orgId }), null);
   assert.ok(await Organization.exists({ _id: orgA }));
+});
+
+test("readiness fails closed when MongoDB disconnects", async () => {
+  assert.equal((await request(app).get("/health/ready")).status, 200);
+  await mongoose.disconnect();
+  try {
+    const response = await request(app).get("/health/ready");
+    assert.equal(response.status, 503);
+    assert.deepEqual(response.body, { status: "unavailable" });
+  } finally {
+    await mongoose.connect(replset.getUri());
+  }
+});
+
+test("expired staff session is rejected", async () => {
+  const sessionValue = cookieA.split("=")[1];
+  assert.ok(sessionValue);
+  await Session.updateOne({ tokenHash: tokenHash(sessionValue) }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+  assert.equal((await request(app).get("/api/auth/me").set("Cookie", cookieA)).status, 401);
 });

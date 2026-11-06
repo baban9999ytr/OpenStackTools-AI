@@ -29,6 +29,7 @@ export const env = {
   trustProxy: Number(process.env.TRUST_PROXY ?? 0),
   smtpHost: must("SMTP_HOST"),
   smtpPort: Number(process.env.SMTP_PORT ?? 1025),
+  smtpRequireTls: process.env.SMTP_REQUIRE_TLS === "true" || process.env.NODE_ENV === "production",
   smtpFrom: must("SMTP_FROM"),
   smtpUser: process.env.SMTP_USER,
   smtpPassword: process.env.SMTP_PASSWORD,
@@ -41,6 +42,8 @@ if (!Number.isInteger(env.trustProxy) || env.trustProxy < 0)
   throw new Error("Invalid TRUST_PROXY");
 if (new URL(env.dashboardOrigin).origin !== env.dashboardOrigin)
   throw new Error("DASHBOARD_ORIGIN must be an origin");
+if (env.nodeEnv === "production" && new URL(env.dashboardOrigin).protocol !== "https:")
+  throw new Error("Production DASHBOARD_ORIGIN must use HTTPS");
 if (!Number.isInteger(env.smtpPort) || env.smtpPort < 1 || env.smtpPort > 65535)
   throw new Error("Invalid SMTP_PORT");
 

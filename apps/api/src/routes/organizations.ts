@@ -12,6 +12,7 @@ import { requireMembership, requireUser } from "../middleware/security.js";
 import { parseUsdMicros } from "../services/money.js";
 import { BudgetWindow } from "../models/index.js";
 import { utcPeriods } from "../services/budget.js";
+import { logger } from "../config/logger.js";
 const router = Router();
 router.use(requireUser);
 const staffInput = z.strictObject({
@@ -121,10 +122,16 @@ router.post(
       },
       { $set: { usedAt: new Date() } },
     );
-    await createAccountToken("invite", email, {
-      organizationId: res.locals.organizationId,
-      role,
-    });
+    try {
+      await createAccountToken("invite", email, {
+        organizationId: res.locals.organizationId,
+        role,
+      });
+    } catch {
+      logger.warn({ mailPurpose: "invite" }, "Account email unavailable");
+      res.status(503).json({ error: "Invitation email temporarily unavailable" });
+      return;
+    }
     res.status(201).json({ invitation: { email, role, expiresInHours: 72 } });
   },
 );

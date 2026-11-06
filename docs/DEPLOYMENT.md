@@ -2,9 +2,17 @@
 
 No production deployment is included. Local Compose runs MongoDB 8 as a single-node replica set, Mailpit for test email, API, and web. Run `docker compose up --build` after setting `apps/api/.env`; Mailpit is at `http://localhost:8025`. Never use Mailpit as a production mail server.
 
+## Ecosystem routing and brand boundary
+
+The parent website stays independently deployed as a static Cloudflare Worker. The AI web application is a separate static Nginx image at `bots.openstacktool.com`, with the dashboard at `/app`. Nginx serves `/app` and deeper SPA paths from `index.html`, the immutable widget bundle at `/embed.js`, and proxies `/api` and `/health` to the private API service. [`deploy/Caddyfile.example`](../deploy/Caddyfile.example) shows a TLS edge routing example; it is not an active deployment. Do not create shared authentication cookies or SSO for this topology.
+
+Set `DASHBOARD_ORIGIN=https://bots.openstacktool.com` exactly, with no path or trailing slash, and `COOKIE_SECURE=true`. The API session cookie remains host-only, HttpOnly, and SameSite=Lax. Account emails link to `https://bots.openstacktool.com/app/#verify=…`, `#reset=…`, or `#invite=…`; the fragment stays out of HTTP requests. Keep the exact-origin CSRF checks and `X-Requested-With` requirement. Set `TRUST_PROXY` to the number of trusted proxy hops actually in front of the API; do not trust arbitrary forwarded headers. Expose only the TLS edge publicly and keep MongoDB and API network access private. Configure TLS redirect/HSTS at the edge after certificate validation.
+
+The Nginx template has a static-app Content Security Policy, no-sniff, and referrer policy. The embeddable widget runs on customer sites, which must allow the widget script and configured API origin under their own CSP. Google Fonts are requested by the dashboard stylesheet; self-host those fonts if third-party font requests are unsuitable for the pilot's privacy policy. Brand colors and dimensions come from `brand/tokens.json` and are generated with `npm run brand:generate`; publish both web and widget assets together when tokens change.
+
 ## Required configuration and release sequence
 
-1. Use Node 22 or 24 LTS. Run `npm ci`, `npm run typecheck`, `npm test`, `npm run test:browser -w apps/web`, `npm run build`, and `npm audit --audit-level=low`.
+1. Use Node 22 or 24 LTS. Run `npm ci`, `npm run brand:check`, `npm run typecheck`, `npm test`, `npm run test:browser -w apps/web`, `npm run build`, and `npm audit --audit-level=low`.
 2. Configure an authenticated, private MongoDB replica set. Back up before schema changes. Run `npm run migrate:budgets -w apps/api` once for organizations created before the pilot fields existed. This fills missing daily/monthly budgets and 30-day retention; it does not overwrite configured values. Verify indexes and migration counts.
 3. Provide `MONGODB_URL`, `SESSION_SECRET` (at least 32 random characters), `OPENAI_API_KEY`, `OPENAI_MODEL`, `DASHBOARD_ORIGIN`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, and optional SMTP credentials through a secret manager. Set `DEFAULT_DAILY_BUDGET_USD`, `DEFAULT_MONTHLY_BUDGET_USD`, and both model token prices from current provider pricing. Keep `COOKIE_SECURE=true`, set exact `TRUST_PROXY`, and serve API, dashboard, and widget over HTTPS.
 4. Validate email sending/receiving, verification, invitation, and reset with the pilot business. Register exact website origins for the assistant. Review site CSP to allow the versioned widget script and API origin. The public assistant key is an identifier, not a secret.

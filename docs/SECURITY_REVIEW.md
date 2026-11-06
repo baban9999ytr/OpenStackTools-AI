@@ -3,6 +3,7 @@
 ## Implemented controls
 
 - Staff cookies are host-only, HttpOnly, SameSite=Lax, and Secure in production. Opaque session values are HMAC-hashed in MongoDB. Users can list and revoke sessions. Password reset revokes all sessions.
+- The production web image serves static assets through Nginx with an `/app` SPA fallback and same-origin `/api` proxy. Its CSP restricts scripts and connections to its own origin and limits font loading to the documented Google Fonts hosts. The sample TLS edge config is not a deployment; production HTTPS and HSTS still require operator validation.
 - Registration requires email verification before login. Staff receive a 72-hour, single-use invitation link and set their own password. Reset and verification links expire after one hour. Links use a URL fragment so the token is not sent in HTTP request paths. No password is emailed.
 - Dashboard mutations require the configured exact Origin and `X-Requested-With`; widget bearer sessions are bound to the site origin, assistant, organization, and visitor. Membership and role checks precede tenant-scoped queries. Cross-tenant API tests run against an ephemeral real MongoDB replica set.
 - Input schemas, a 16 KB JSON limit, Helmet, and MongoDB-backed distributed request counters apply. Per-organization daily and monthly AI budgets reserve a conservative maximum before the provider call and settle measured usage afterward. Failed or timed-out provider calls consume the full reservation as uncertain cost.

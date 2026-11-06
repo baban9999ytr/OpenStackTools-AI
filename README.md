@@ -18,7 +18,7 @@ cp apps/api/.env.example apps/api/.env
 docker compose up --build
 ```
 
-Open `http://localhost:5173` and use Mailpit at `http://localhost:8025` to open verification and invitation email. MongoDB is initialized as a single-node replica set for development. The Docker configuration binds API and web ports to localhost; MongoDB is reachable only inside the Compose network. Data persists in a Docker named volume. Do not use this Compose file as a production deployment.
+Open `http://localhost:5173/app` and use Mailpit at `http://localhost:8025` to open verification and invitation email. The web image builds static assets and serves them with Nginx, including an `/app` SPA fallback and same-origin `/api` proxy. MongoDB is initialized as a single-node replica set for development. The Docker configuration binds API and web ports to localhost; MongoDB is reachable only inside the Compose network. Data persists in a Docker named volume. Do not use this Compose file as a production deployment.
 
 ## Run from Node.js
 
@@ -48,6 +48,8 @@ Use separate terminals for the two dev commands. Vite proxies `/api` to the back
 
 The public key is an identifier, not a credential. The browser requests a short-lived, origin-bound widget session. The widget is an original React component mounted in Shadow DOM. It does not use third-party artwork.
 
+The widget follows the embedding page's `lang` and `data-theme` where set. Optional `data-ost-lang="tr"` or `"en"` and `data-ost-theme="dark"` or `"light"` override those choices. The dashboard stores its language and theme locally. The versioned framework-independent brand contract is [`brand/tokens.json`](brand/tokens.json); run `npm run brand:generate` after changing it, then commit both generated stylesheets.
+
 ## Configuration
 
 | Variable | Purpose |
@@ -59,11 +61,12 @@ The public key is an identifier, not a credential. The browser requests a short-
 | `DEFAULT_DAILY_BUDGET_USD` / `DEFAULT_MONTHLY_BUDGET_USD` | New-organization AI spend caps in USD |
 | `OPENAI_INPUT_USD_PER_MILLION_TOKENS` / `OPENAI_OUTPUT_USD_PER_MILLION_TOKENS` | Current model prices used for cost estimates and budget reservations |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_FROM` | Account email; optional `SMTP_USER` and `SMTP_PASSWORD` |
-| `DASHBOARD_ORIGIN` | Exact dashboard browser origin used for CORS and CSRF checks |
+| `DASHBOARD_ORIGIN` | Exact dashboard browser origin (without `/app`) used for CORS, CSRF, and account links |
 | `PORT` | API port, default 5000 |
 | `NODE_ENV` / `COOKIE_SECURE` | Enable Secure cookies for HTTPS production |
 | `TRUST_PROXY` | Exact count of trusted proxy hops, default 0 |
 | `API_PROXY_TARGET` | Vite development API proxy destination |
+| `API_UPSTREAM` | Nginx production web container's private API URL |
 | `VITE_API_BASE_URL` | Optional public API origin for dashboard build |
 
 Frontend environment variables are public. Store credentials only in the API environment or a production secret manager. Do not put production secrets in `.env.example`, source control, or build arguments.
@@ -72,6 +75,7 @@ Frontend environment variables are public. Store credentials only in the API env
 
 ```bash
 npm run typecheck
+npm run brand:check
 npm run build
 npm test
 npm run test:browser -w apps/web

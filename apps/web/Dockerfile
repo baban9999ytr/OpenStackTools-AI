@@ -1,10 +1,14 @@
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 RUN npm ci
-COPY docs/THIRD_PARTY_LICENSES.md ./THIRD_PARTY_LICENSES.md
 COPY apps/web apps/web
+RUN npm run build -w apps/web
+
+FROM nginx:stable-alpine
+COPY --from=build /app/apps/web/dist /usr/share/nginx/html
+COPY apps/web/nginx.conf.template /etc/nginx/templates/default.conf.template
+ENV API_UPSTREAM=http://api:5000
 EXPOSE 5173
-CMD ["npm", "run", "dev", "-w", "apps/web"]

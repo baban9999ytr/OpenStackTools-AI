@@ -1,0 +1,8 @@
+# Example public TLS edge. Requires operator-managed DNS and deployment approval.
+# Caddy obtains/renews a certificate when the hostname resolves to this edge.
+bots.openstacktool.com {
+  encode zstd gzip
+  reverse_proxy /api/* api:5000
+  reverse_proxy /health/* api:5000
+  reverse_proxy web:5173
+}

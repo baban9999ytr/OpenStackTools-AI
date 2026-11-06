@@ -3,6 +3,8 @@ import { env } from "../config/env.js";
 
 type Purpose = "verify" | "reset" | "invite";
 type Mail = { to: string; purpose: Purpose; token: string };
+export const accountLink = (purpose: Purpose, token: string) =>
+  `${env.dashboardOrigin}/app/#${purpose}=${encodeURIComponent(token)}`;
 const transport = nodemailer.createTransport({
   host: env.smtpHost,
   port: env.smtpPort,
@@ -13,9 +15,7 @@ const transport = nodemailer.createTransport({
       : undefined,
 });
 let send = async ({ to, purpose, token }: Mail) => {
-  const action =
-    purpose === "verify" ? "verify" : purpose === "reset" ? "reset" : "invite";
-  const link = `${env.dashboardOrigin}/#${action}=${encodeURIComponent(token)}`;
+  const link = accountLink(purpose, token);
   await transport.sendMail({
     from: env.smtpFrom,
     to,

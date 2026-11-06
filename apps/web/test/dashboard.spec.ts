@@ -60,3 +60,14 @@ test("email verification link works under /app and clears token fragment", async
   expect(token).toBe("pilot-token");
   expect(new URL(page.url()).hash).toBe("");
 });
+
+test("light sign-in remains accessible on a narrow screen", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/api/auth/me", route => route.fulfill({ status: 401, json: { error: "Authentication required" } }));
+  await page.goto("http://127.0.0.1:5173/app");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const a11y = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  expect(a11y.violations).toEqual([]);
+});

@@ -19,6 +19,7 @@ process.env.SMTP_FROM = "test@example.test";
 let replset: MongoMemoryReplSet;
 const { createApp } = await import("../src/app.js");
 const { setMailSenderForTests } = await import("../src/services/mail.js");
+const { accountLink } = await import("../src/services/mail.js");
 const mailed = new Map<string, string>();
 setMailSenderForTests(async ({ to, token }) => {
   mailed.set(to, token);
@@ -77,6 +78,12 @@ after(async () => {
 });
 
 test("register separate organizations and reject invalid input", async () => {
+  assert.equal(
+    accountLink("verify", "test token"),
+    "http://localhost:5173/app/#verify=test%20token",
+  );
+  assert.equal(accountLink("reset", "reset-token"), "http://localhost:5173/app/#reset=reset-token");
+  assert.equal(accountLink("invite", "invite-token"), "http://localhost:5173/app/#invite=invite-token");
   const invalid = await request(app)
     .post("/api/auth/register")
     .set(dashboardHeaders)
@@ -115,6 +122,21 @@ test("register separate organizations and reject invalid input", async () => {
   assert.equal(verifiedA.status, 200);
   cookieA = cookieFrom(verifiedA);
   assert.match(cookieA, /^ost_session=/);
+  const sessionCookie =
+    (verifiedA.headers["set-cookie"] as unknown as string[])[0] ?? "";
+  assert.match(sessionCookie, /HttpOnly/);
+  assert.match(sessionCookie, /SameSite=Lax/);
+  assert.doesNotMatch(sessionCookie, /Domain=/);
+  assert.equal(
+    (
+      await request(app)
+        .post("/api/auth/logout")
+        .set("Cookie", cookieA)
+        .set("Origin", "https://untrusted.test")
+        .set("X-Requested-With", "XMLHttpRequest")
+    ).status,
+    403,
+  );
   const b = await request(app)
     .post("/api/auth/register")
     .set(dashboardHeaders)

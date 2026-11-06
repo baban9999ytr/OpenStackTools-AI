@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
+import { widgetBrandCss } from "./widget-brand";
 
 type Message = {
   _id?: string;
@@ -18,15 +19,23 @@ type Saved = {
   conversationId?: string;
   pending?: Pending;
 };
-const css = `:host{all:initial;font-family:ui-sans-serif,system-ui,sans-serif;color:#17304e}.ost-launch{position:fixed;right:24px;bottom:24px;z-index:2147483647;border:0;border-radius:999px;background:#315bd4;color:white;padding:16px 20px;font:700 15px ui-sans-serif,system-ui;box-shadow:0 10px 28px #142d5460;cursor:pointer}.ost-panel{position:fixed;right:24px;bottom:82px;z-index:2147483647;width:min(370px,calc(100vw - 32px));height:min(550px,calc(100vh - 110px));display:flex;flex-direction:column;background:white;border:1px solid #d8e2ef;border-radius:18px;box-shadow:0 18px 60px #142d5460;overflow:hidden}.ost-head{background:#142d54;color:white;padding:17px 20px;font-weight:700;display:flex;justify-content:space-between;align-items:center}.ost-head small{display:block;color:#bad1ee;font-weight:400;margin-top:3px}.ost-head button{background:transparent;color:white;border:1px solid #bad1ee;border-radius:5px;padding:4px;font:inherit;cursor:pointer}.ost-messages{flex:1;overflow:auto;padding:16px;background:#f7f9fc}.ost-message{max-width:85%;padding:9px 12px;margin:8px 0;border-radius:12px;background:#e8edf5;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}.ost-message.customer{margin-left:auto;background:#dce8ff}.ost-form{display:flex;gap:8px;padding:12px;background:white;border-top:1px solid #e5ebf2}.ost-form input{flex:1;min-width:0;padding:10px;border:1px solid #cfd9e5;border-radius:8px;font:inherit}.ost-form button{border:0;border-radius:8px;background:#315bd4;color:white;padding:10px 13px;font:700 13px ui-sans-serif,system-ui;cursor:pointer}.ost-form button:disabled{opacity:.6}.ost-error{color:#a43120;padding:0 14px;font-size:13px}.ost-state{padding:0 14px;font-size:13px}.ost-retry{margin:0 14px 8px}`;
+const css = `${widgetBrandCss}\n:host{font-family:var(--ost-font-sans);color:var(--ost-text)}*{box-sizing:border-box}.ost-launch{position:fixed;right:24px;bottom:24px;z-index:2147483647;border:0;border-radius:999px;background:var(--ost-accent);color:var(--ost-accent-text);padding:16px 20px;font:700 15px var(--ost-font-sans);box-shadow:0 10px 28px #09090b50;cursor:pointer}.ost-panel{position:fixed;right:24px;bottom:82px;z-index:2147483647;width:min(370px,calc(100vw - 32px));height:min(550px,calc(100vh - 110px));display:flex;flex-direction:column;background:var(--ost-surface);color:var(--ost-text);border:1px solid var(--ost-border);border-radius:12px;box-shadow:0 18px 60px #09090b50;overflow:hidden}.ost-head{background:var(--ost-surface-soft);border-bottom:1px solid var(--ost-border);padding:17px 20px;font-weight:700;display:flex;gap:12px;justify-content:space-between;align-items:center}.ost-head small{display:block;color:var(--ost-muted);font-weight:400;margin-top:3px}.ost-head button{background:transparent;color:var(--ost-text);border:1px solid var(--ost-border);border-radius:4px;padding:4px;font:inherit;cursor:pointer}.ost-messages{flex:1;overflow:auto;padding:16px;background:var(--ost-page)}.ost-message{max-width:85%;padding:9px 12px;margin:8px 0;border-radius:8px;background:var(--ost-surface-soft);white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}.ost-message.customer{margin-left:auto;background:var(--ost-accent-subtle)}.ost-form{display:flex;gap:8px;padding:12px;background:var(--ost-surface);border-top:1px solid var(--ost-border)}.ost-form input{flex:1;min-width:0;padding:10px;border:1px solid var(--ost-border);border-radius:8px;background:var(--ost-surface);color:var(--ost-text);font:inherit}.ost-form button{border:0;border-radius:8px;background:var(--ost-accent);color:var(--ost-accent-text);padding:10px 13px;font:700 13px var(--ost-font-sans);cursor:pointer}.ost-form button:disabled{opacity:.6}.ost-error{color:var(--ost-danger);padding:0 14px;font-size:13px}.ost-state{padding:0 14px;font-size:13px}.ost-retry{margin:0 14px 8px;background:var(--ost-surface);color:var(--ost-accent);border:1px solid var(--ost-border);border-radius:4px;padding:6px;cursor:pointer}:focus-visible{outline:2px solid var(--ost-focus);outline-offset:2px}`;
+
+const labels = {
+  en: { assistant: "AI assistant", handoff: "A team member will reply here.", closed: "This conversation is closed.", sending: "Sending message…", waiting: "Waiting for a reply…", failed: "The assistant could not reply. Please try a new message.", uncertain: "Message status is uncertain. Retry uses the same message ID.", sendError: "Could not send message", connectionError: "Connection failed", lost: "Connection lost", startError: "Could not start chat", close: "Close chat", launch: "Chat with us", chat: "Business chat", privacy: "Messages are shared with this business.", clearLabel: "Clear this chat session", clear: "Clear chat", empty: "How can we help?", retry: "Retry message safely", input: "Your message", placeholder: "Write a message…", send: "Send" },
+  tr: { assistant: "Yapay zekâ asistanı", handoff: "Bir ekip üyesi buradan yanıt verecek.", closed: "Bu görüşme kapandı.", sending: "Mesaj gönderiliyor…", waiting: "Yanıt bekleniyor…", failed: "Asistan yanıt veremedi. Yeni bir mesaj deneyin.", uncertain: "Mesajın durumu belirsiz. Yeniden deneme aynı mesaj kimliğini kullanır.", sendError: "Mesaj gönderilemedi", connectionError: "Bağlantı kurulamadı", lost: "Bağlantı koptu", startError: "Sohbet başlatılamadı", close: "Sohbeti kapat", launch: "Bizimle sohbet edin", chat: "İşletme sohbeti", privacy: "Mesajlarınız bu işletmeyle paylaşılır.", clearLabel: "Bu sohbet oturumunu temizle", clear: "Sohbeti temizle", empty: "Nasıl yardımcı olabiliriz?", retry: "Mesajı güvenle yeniden dene", input: "Mesajınız", placeholder: "Mesaj yazın…", send: "Gönder" },
+} as const;
 
 export function Widget({
   publicKey,
   apiBase,
+  language,
 }: {
   publicKey: string;
   apiBase: string;
+  language: "en" | "tr";
 }) {
+  const t = labels[language];
   const storageKey = `ost-widget:${apiBase}:${publicKey}`;
   const readSaved = (): Saved | null => {
     try {
@@ -47,7 +56,7 @@ export function Widget({
   };
   const [saved, setSaved] = useState<Saved | null>(readSaved);
   const [open, setOpen] = useState(false);
-  const [assistantName, setAssistantName] = useState("AI assistant");
+  const [assistantName, setAssistantName] = useState<string>(t.assistant);
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -83,16 +92,16 @@ export function Widget({
     );
     setMessages(data.messages);
     if (data.conversation.status === "handoff")
-      setStatus("A team member will reply here.");
+      setStatus(t.handoff);
     else if (data.conversation.status === "closed")
-      setStatus("This conversation is closed.");
+      setStatus(t.closed);
     else if (!state.pending) setStatus("");
   };
   const sendPending = async (state: Saved) => {
     if (!state.pending) return;
     setBusy(true);
     setError("");
-    setStatus("Sending message…");
+    setStatus(t.sending);
     try {
       const data = await fetchJson("/messages", state.token, state.pending);
       const next: Saved = {
@@ -106,8 +115,8 @@ export function Widget({
       save(next);
       if (data.status === "completed") setStatus("");
       else if (data.status === "handoff")
-        setStatus("A team member will reply here.");
-      else setStatus("Waiting for a reply…");
+        setStatus(t.handoff);
+      else setStatus(t.waiting);
       await refresh(next);
     } catch (caught) {
       if (
@@ -117,9 +126,9 @@ export function Widget({
       )
         save({ ...state, pending: undefined });
       setError(
-        caught instanceof Error ? caught.message : "Could not send message",
+        caught instanceof Error ? caught.message : t.sendError,
       );
-      setStatus("Message status is uncertain. Retry uses the same message ID.");
+      setStatus(t.uncertain);
     } finally {
       setBusy(false);
     }
@@ -143,7 +152,7 @@ export function Widget({
       } catch (caught) {
         if (!cancelled)
           setError(
-            caught instanceof Error ? caught.message : "Connection failed",
+            caught instanceof Error ? caught.message : t.connectionError,
           );
       }
     };
@@ -172,16 +181,16 @@ export function Widget({
             save(next);
             setStatus(
               request.status === "handoff"
-                ? "A team member will reply here."
+                ? t.handoff
                 : request.status === "failed"
-                  ? "The assistant could not reply. Please try a new message."
+                  ? t.failed
                   : "",
             );
           }
         }
         await refresh(current);
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Connection lost");
+        setError(caught instanceof Error ? caught.message : t.lost);
       }
     }, 3000);
     return () => window.clearInterval(timer);
@@ -197,7 +206,7 @@ export function Widget({
       setError("");
     } catch (caught) {
       setError(
-        caught instanceof Error ? caught.message : "Could not start chat",
+        caught instanceof Error ? caught.message : t.startError,
       );
     } finally {
       setBusy(false);
@@ -241,29 +250,29 @@ export function Widget({
         aria-expanded={open}
         aria-controls="ost-chat-panel"
       >
-        {open ? "Close chat" : "Chat with us"}
+        {open ? t.close : t.launch}
       </button>
       {open && (
         <section
           id="ost-chat-panel"
           className="ost-panel"
-          aria-label="Business chat"
+          aria-label={t.chat}
         >
           <header className="ost-head">
             <span>
               {assistantName}
-              <small>Messages are shared with this business.</small>
+              <small>{t.privacy}</small>
             </span>
             <button
               type="button"
               onClick={clear}
-              aria-label="Clear this chat session"
+              aria-label={t.clearLabel}
             >
-              Clear chat
+              {t.clear}
             </button>
           </header>
           <div className="ost-messages" aria-live="polite">
-            {messages.length === 0 && <p>How can we help?</p>}
+            {messages.length === 0 && <p>{t.empty}</p>}
             {messages.map((message, index) => (
               <div
                 key={message._id ?? index}
@@ -289,14 +298,14 @@ export function Widget({
               type="button"
               onClick={() => void sendPending(saved)}
             >
-              Retry message safely
+              {t.retry}
             </button>
           )}
           <form className="ost-form" onSubmit={send}>
             <input
               name="message"
-              aria-label="Your message"
-              placeholder="Write a message…"
+              aria-label={t.input}
+              placeholder={t.placeholder}
               maxLength={4000}
               required
               disabled={!saved || busy || Boolean(saved.pending)}
@@ -305,7 +314,7 @@ export function Widget({
               disabled={!saved || busy || Boolean(saved.pending)}
               type="submit"
             >
-              Send
+              {t.send}
             </button>
           </form>
         </section>
@@ -320,7 +329,12 @@ if (publicKey && apiBase) {
   const host = document.createElement("div");
   host.id = `openstacktools-widget-${publicKey}`;
   document.body.append(host);
-  createRoot(host.attachShadow({ mode: "open" })).render(
-    <Widget publicKey={publicKey} apiBase={apiBase} />,
+  const language = (script.dataset.ostLang ?? document.documentElement.lang ?? navigator.language).toLowerCase().startsWith("tr") ? "tr" : "en";
+  const explicitTheme = script.dataset.ostTheme;
+  const theme = explicitTheme === "light" || explicitTheme === "dark" ? explicitTheme : document.documentElement.dataset.theme === "dark" || (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+  const shadow = host.attachShadow({ mode: "open" });
+  shadow.host.setAttribute("data-theme", theme);
+  createRoot(shadow).render(
+    <Widget publicKey={publicKey} apiBase={apiBase} language={language} />,
   );
 }

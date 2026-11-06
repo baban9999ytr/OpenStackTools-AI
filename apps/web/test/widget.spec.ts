@@ -82,3 +82,20 @@ test("widget restores messages after reload and retries one idempotent request",
   await shadow.getByRole("button", { name: "Clear this chat session" }).click();
   expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
 });
+
+test("widget follows Turkish page language and explicit dark theme", async ({ page }) => {
+  await page.route("**/pilot-page.html", route => route.fulfill({
+    contentType: "text/html",
+    body: '<!doctype html><html lang="tr"><head><meta charset="utf-8"></head><body><script src="http://127.0.0.1:5173/embed.js" data-ost-assistant="ost_test" data-ost-api="http://127.0.0.1:5173" data-ost-theme="dark"></script></body></html>',
+  }));
+  await page.route("**/api/widget/sessions", route => route.fulfill({ status: 201, json: { token: "test-token", expiresAt: new Date(Date.now() + 60_000).toISOString(), assistant: { name: "Pilot yardımcısı" } } }));
+  await page.route("**/api/widget/sessions/current", route => route.fulfill({ json: { assistant: { name: "Pilot yardımcısı" }, conversationId: null } }));
+  await page.goto("http://127.0.0.1:5173/pilot-page.html");
+  const host = page.locator("[id^=openstacktools-widget-]");
+  await expect(host).toHaveAttribute("data-theme", "dark");
+  await host.getByRole("button", { name: "Bizimle sohbet edin" }).click();
+  await expect(host.getByLabel("İşletme sohbeti")).toBeVisible();
+  await expect(host.getByText("Mesajlarınız bu işletmeyle paylaşılır.")).toBeVisible();
+  await expect(host.getByRole("textbox", { name: "Mesajınız" })).toBeVisible();
+  await expect(host.getByRole("button", { name: "Gönder" })).toBeVisible();
+});

@@ -84,6 +84,8 @@ npm audit --audit-level=low
 
 `GET /health/live` confirms the API process is alive; `GET /health/ready` checks MongoDB connectivity. API tests use a real ephemeral MongoDB replica set and a fake AI responder. The Chromium widget test uses mocked API responses. Neither calls OpenAI. See [pilot report](PILOT_READINESS_REPORT.md) and [security review](docs/SECURITY_REVIEW.md) for remaining release gates.
 
+The explicit live OpenAI and SMTP checks require operator-set opt-in flags and dedicated credentials; see [staging runbook](STAGING_RUNBOOK.md). The [backup restore runbook](BACKUP_RESTORE_RUNBOOK.md) includes a local isolated restore rehearsal. Do not treat local Mailpit or mocked AI checks as proof of external delivery or billing.
+
 ## Documentation
 
 - [Architecture and API boundaries](docs/ARCHITECTURE.md)
@@ -91,6 +93,9 @@ npm audit --audit-level=low
 - [Security review](docs/SECURITY_REVIEW.md)
 - [Verification record](docs/VERIFICATION.md)
 - [Deployment preparation](docs/DEPLOYMENT.md)
+- [Phase 3 readiness report](PHASE3_PILOT_READINESS_REPORT.md)
+- [Staging runbook](STAGING_RUNBOOK.md)
+- [Backup and restore runbook](BACKUP_RESTORE_RUNBOOK.md)
 - [Implementation roadmap](docs/ROADMAP.md)
 - [Source and asset provenance](docs/PROVENANCE.md)
 - [Dependency inventory and notices](docs/THIRD_PARTY_LICENSES.md)

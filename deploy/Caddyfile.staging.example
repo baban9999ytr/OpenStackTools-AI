@@ -1,0 +1,16 @@
+# Staging-only example. Caddy obtains a certificate after approved DNS exists.
+{$STAGING_HOST} {
+  encode zstd gzip
+  header Strict-Transport-Security "max-age=31536000"
+  @privateReady path /health/ready
+  respond @privateReady 404
+  handle /api/* {
+    reverse_proxy api:5000
+  }
+  handle /health/live {
+    reverse_proxy api:5000
+  }
+  handle {
+    reverse_proxy web:5173
+  }
+}

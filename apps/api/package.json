@@ -9,7 +9,10 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
-    "migrate:budgets": "tsx src/scripts/migrate-pilot-budgets.ts"
+    "migrate:budgets": "tsx src/scripts/migrate-pilot-budgets.ts",
+    "test:openai:live": "tsx test/live-openai.ts",
+    "test:smtp:live": "tsx test/live-smtp.ts",
+    "test:backup:restore": "tsx test/backup-restore.ts"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

@@ -115,4 +115,4 @@ finally:
             "organizationName": "One Call Provider Test", "password": PASSWORD,
         })
         if status != 200:
-            print(f"Synthetic test tenant cleanup requires attention: HTTP {status}")
+            raise AssertionError(f"Synthetic test tenant cleanup requires attention: HTTP {status}")

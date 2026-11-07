@@ -10,14 +10,16 @@ mongo=(mongosh --quiet --host mongo --authenticationDatabase admin --username "$
 dump=(mongodump --quiet --host mongo --authenticationDatabase admin --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD")
 restore=(mongorestore --quiet --host mongo --authenticationDatabase admin --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD")
 cleanup() {
+  local cleanup_status=0
   "${mongo[@]}" --eval '
     const marker = process.env.MARKER;
     const source = db.getSiblingDB("ost_ai_local");
     for (const name of ["messages", "conversations", "assistants", "organizations"])
       source.getCollection(name).deleteMany({ localRestoreMarker: marker });
     db.getSiblingDB("ost_ai_restore_" + marker).dropDatabase();
-  ' >/dev/null 2>&1 || true
+  ' >/dev/null 2>&1 || cleanup_status=1
   rm -f "$archive"
+  if [ "$cleanup_status" -ne 0 ]; then echo 'Synthetic restore cleanup failed' >&2; exit 1; fi
 }
 trap cleanup EXIT
 

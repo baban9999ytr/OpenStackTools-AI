@@ -104,7 +104,10 @@ try {
         return response.status;
       }, { id: organizationId, name: orgName, password });
     }
-    if (status !== 200) console.log(`Synthetic browser tenant cleanup requires attention: HTTP ${status}`);
+    if (status !== 200) {
+      console.error(`Synthetic browser tenant cleanup requires attention: HTTP ${status}`);
+      process.exitCode = 1;
+    }
   }
   await browser.close();
 }

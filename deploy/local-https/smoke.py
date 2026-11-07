@@ -161,7 +161,7 @@ def main():
                         "organizationName": name, "password": password,
                     })
             if status != 200:
-                print(f"Cleanup requires attention for organization {organization_id}: HTTP {status}")
+                raise AssertionError(f"Cleanup requires attention for organization {organization_id}: HTTP {status}")
 
 
 if __name__ == "__main__":

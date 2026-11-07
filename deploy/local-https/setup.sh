@@ -4,6 +4,9 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 secret_dir="$here/.secrets"
 if [ -e "$secret_dir" ]; then
+  for required in root-ca.crt root-ca.key ai.localhost.crt ai.localhost.key mailpit.crt mailpit.key mongo-keyfile mongo.env api.env; do
+    test -f "$secret_dir/$required" || { echo "Local staging secrets are incomplete: missing $required" >&2; exit 1; }
+  done
   echo 'Local staging secrets already exist; preserving them.'
   exit 0
 fi

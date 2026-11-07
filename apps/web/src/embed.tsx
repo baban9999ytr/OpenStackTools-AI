@@ -7,6 +7,7 @@ type Message = {
   role: "customer" | "assistant" | "agent";
   text: string;
 };
+type PendingAction = { id: string; name: string; arguments: Record<string, unknown>; expiresAt: string };
 type Pending = {
   text: string;
   clientMessageId: string;
@@ -24,6 +25,10 @@ const css = `${widgetBrandCss}\n:host{font-family:var(--ost-font-sans);color:var
 const labels = {
   en: { assistant: "AI assistant", handoff: "A team member will reply here.", closed: "This conversation is closed.", sending: "Sending message…", waiting: "Waiting for a reply…", failed: "The assistant could not reply. Please try a new message.", uncertain: "Message status is uncertain. Retry uses the same message ID.", terminal: "No AI reply was sent. You can start a new message.", sendError: "Could not send message", connectionError: "Connection failed", lost: "Connection lost", startError: "Could not start chat", close: "Close chat", launch: "Chat with us", chat: "Business chat", privacy: "Messages are shared with this business.", clearLabel: "Clear this chat session", clear: "Clear chat", empty: "How can we help?", retry: "Retry message safely", input: "Your message", placeholder: "Write a message…", send: "Send" },
   tr: { assistant: "Yapay zekâ asistanı", handoff: "Bir ekip üyesi buradan yanıt verecek.", closed: "Bu görüşme kapandı.", sending: "Mesaj gönderiliyor…", waiting: "Yanıt bekleniyor…", failed: "Asistan yanıt veremedi. Yeni bir mesaj deneyin.", uncertain: "Mesajın durumu belirsiz. Yeniden deneme aynı mesaj kimliğini kullanır.", terminal: "Yapay zekâ yanıtı gönderilmedi. Yeni bir mesaj yazabilirsiniz.", sendError: "Mesaj gönderilemedi", connectionError: "Bağlantı kurulamadı", lost: "Bağlantı koptu", startError: "Sohbet başlatılamadı", close: "Sohbeti kapat", launch: "Bizimle sohbet edin", chat: "İşletme sohbeti", privacy: "Mesajlarınız bu işletmeyle paylaşılır.", clearLabel: "Bu sohbet oturumunu temizle", clear: "Sohbeti temizle", empty: "Nasıl yardımcı olabiliriz?", retry: "Mesajı güvenle yeniden dene", input: "Mesajınız", placeholder: "Mesaj yazın…", send: "Gönder" },
+} as const;
+const actionLabels = {
+  en: { confirm: "Confirm action", decline: "Decline", pending: "Review before this action is performed", create_appointment: "Book appointment", reschedule_appointment: "Move appointment", cancel_appointment: "Cancel appointment", create_customer: "Save customer request" },
+  tr: { confirm: "İşlemi onayla", decline: "Reddet", pending: "İşlem yapılmadan önce gözden geçirin", create_appointment: "Randevu oluştur", reschedule_appointment: "Randevuyu taşı", cancel_appointment: "Randevuyu iptal et", create_customer: "Müşteri talebini kaydet" },
 } as const;
 
 export function Widget({
@@ -58,6 +63,7 @@ export function Widget({
   const [open, setOpen] = useState(false);
   const [assistantName, setAssistantName] = useState<string>(t.assistant);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -91,6 +97,8 @@ export function Widget({
       state.token,
     );
     setMessages(data.messages);
+    const actions = await fetchJson("/actions/pending", state.token).catch(() => ({ actions: [] }));
+    setPendingActions(actions.actions ?? []);
     if (data.conversation.status === "handoff")
       setStatus(t.handoff);
     else if (data.conversation.status === "closed")
@@ -200,7 +208,7 @@ export function Widget({
     if (saved) return;
     setBusy(true);
     try {
-      const data = await fetchJson("/sessions", undefined, { publicKey });
+      const data = await fetchJson("/sessions", undefined, { publicKey, locale: language });
       save({ token: data.token, expiresAt: data.expiresAt });
       setAssistantName(data.assistant.name);
       setError("");
@@ -215,6 +223,7 @@ export function Widget({
   function clear() {
     save(null);
     setMessages([]);
+    setPendingActions([]);
     setStatus("");
     setError("");
     setOpen(false);
@@ -239,6 +248,17 @@ export function Widget({
     save(next);
     setMessages((previous) => [...previous, { role: "customer", text }]);
     await sendPending(next);
+  }
+  async function decide(action: PendingAction, confirmed: boolean) {
+    if (!saved || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await fetchJson(`/actions/${action.id}/${confirmed ? "confirm" : "decline"}`, saved.token, {});
+      await refresh(saved);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t.connectionError);
+    } finally { setBusy(false); }
   }
   return (
     <>
@@ -287,6 +307,18 @@ export function Widget({
               {status}
             </p>
           )}
+          {pendingActions.map((action) => {
+            const names = actionLabels[language];
+            const title = names[action.name as keyof typeof names] ?? action.name;
+            const details = action.name === "create_customer"
+              ? `${String(action.arguments.name ?? "")} · ${String(action.arguments.contact ?? "")}`
+              : `${String(action.arguments.startAt ?? action.arguments.appointmentId ?? "")} ${action.arguments.durationMinutes ? `· ${action.arguments.durationMinutes} min` : ""}`;
+            return <section key={action.id} className="ost-state" aria-label={names.pending}>
+              <strong>{title}</strong><p>{details}</p>
+              <button type="button" disabled={busy} onClick={() => void decide(action, true)}>{names.confirm}</button>{" "}
+              <button type="button" disabled={busy} onClick={() => void decide(action, false)}>{names.decline}</button>
+            </section>;
+          })}
           {error && (
             <p className="ost-error" role="alert">
               {error}

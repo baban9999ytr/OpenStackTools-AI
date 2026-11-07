@@ -119,3 +119,43 @@ test("terminal provider failure allows a new message without unsafe replay", asy
   await expect(host.getByRole("button", { name: "Retry message safely" })).toHaveCount(0);
   await expect(host.getByRole("textbox", { name: "Your message" })).toBeEnabled();
 });
+
+test("widget requires a visible confirmation before booking and persists the result", async ({ page }) => {
+  let pending = false;
+  let booked = false;
+  const messages: Array<{ _id: string; role: string; text: string }> = [];
+  await page.route("**/pilot-page.html", (route) => route.fulfill({ contentType: "text/html",
+    body: '<!doctype html><html lang="en"><body><script src="http://127.0.0.1:5173/embed.js" data-ost-assistant="ost_test" data-ost-api="http://127.0.0.1:5173"></script></body></html>',
+  }));
+  await page.route("**/api/widget/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/widget/sessions") return route.fulfill({ status: 201, json: { token: "test-token", expiresAt: new Date(Date.now() + 60_000).toISOString(), assistant: { name: "Receptionist" } } });
+    if (path === "/api/widget/sessions/current") return route.fulfill({ json: { assistant: { name: "Receptionist" }, conversationId: messages.length ? "conversation-1" : null } });
+    if (path === "/api/widget/messages" && route.request().method() === "POST") {
+      pending = true;
+      messages.push({ _id: "customer", role: "customer", text: "Book this" }, { _id: "proposal", role: "assistant", text: "Please review and confirm this appointment request. No booking has been made yet." });
+      return route.fulfill({ status: 201, json: { status: "completed", conversationId: "conversation-1", requestId: "request-1", action: { id: "action-1", status: "pending" } } });
+    }
+    if (path === "/api/widget/conversations/conversation-1/messages") return route.fulfill({ json: { conversation: { status: "bot" }, messages } });
+    if (path === "/api/widget/actions/pending") return route.fulfill({ json: { actions: pending ? [{ id: "action-1", name: "create_appointment", arguments: { startAt: "2027-02-01T09:00:00Z", durationMinutes: 30 }, expiresAt: new Date(Date.now() + 60_000).toISOString() }] : [] } });
+    if (path === "/api/widget/actions/action-1/confirm") {
+      pending = false; booked = true;
+      messages.push({ _id: "confirmed", role: "assistant", text: "Your appointment is confirmed." });
+      return route.fulfill({ json: { action: { status: "completed" }, message: "Your appointment is confirmed." } });
+    }
+    return route.fulfill({ status: 404, json: { error: "Not found" } });
+  });
+  await page.goto("http://127.0.0.1:5173/pilot-page.html");
+  const host = page.locator("[id^=openstacktools-widget-]");
+  await host.getByRole("button", { name: "Chat with us" }).click();
+  await host.getByRole("textbox", { name: "Your message" }).fill("Book this");
+  await host.getByRole("button", { name: "Send" }).click();
+  await expect(host.getByRole("button", { name: "Confirm action" })).toBeVisible();
+  expect(booked).toBe(false);
+  await host.getByRole("button", { name: "Confirm action" }).click();
+  await expect(host.getByText("Your appointment is confirmed.")).toBeVisible();
+  expect(booked).toBe(true);
+  await page.reload();
+  await host.getByRole("button", { name: "Chat with us" }).click();
+  await expect(host.getByText("Your appointment is confirmed.")).toBeVisible();
+});

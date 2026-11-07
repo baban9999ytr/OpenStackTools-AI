@@ -71,3 +71,26 @@ test("light sign-in remains accessible on a narrow screen", async ({ page }) => 
   const a11y = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(a11y.violations).toEqual([]);
 });
+
+test("receptionist dashboard works on mobile in Turkish and dark theme", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockDashboard(page);
+  await page.route("**/api/organizations/org1/receptionist/config", route => route.fulfill({ json: {
+    timeZone: "Europe/Istanbul", openingHours: [{ day: 1, startMinute: 540, endMinute: 1020 }],
+    staff: [{ id: "staff1", name: "Pilot Staff", windows: [{ day: 1, startMinute: 540, endMinute: 1020 }] }],
+  } }));
+  await page.route("**/api/organizations/org1/receptionist/appointments", route => route.fulfill({ json: { appointments: [] } }));
+  await page.route("**/api/organizations/org1/receptionist/customers", route => route.fulfill({ json: { customers: [] } }));
+  await page.route("**/api/organizations/org1/receptionist/actions", route => route.fulfill({ json: { actions: [] } }));
+  await page.goto("http://127.0.0.1:5173/app");
+  await page.getByRole("button", { name: "Theme" }).click();
+  await page.getByRole("button", { name: "Language" }).click();
+  await page.getByRole("button", { name: "Menü" }).click();
+  await page.getByRole("button", { name: "Resepsiyon" }).click();
+  await expect(page.getByRole("heading", { name: "Randevular" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Çalışma saatleri" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Personel müsaitliği" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const a11y = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  expect(a11y.violations).toEqual([]);
+});

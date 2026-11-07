@@ -12,11 +12,16 @@
 | `messages` | `(organizationId,conversationId,createdAt)`; unique partial client message ID and unique partial `(requestId,role)` |
 | `sessions` | Unique HMAC token hash; expiry TTL |
 | `accounttokens` | Unique HMAC token hash; purpose, email, expiry TTL, used timestamp |
-| `widgetsessions` | Unique HMAC token hash; origin/visitor/assistant/organization; expiry TTL |
-| `widgetrequests` | Unique `(organizationId,assistantId,visitorId,clientMessageId)`; status and conversation queue indexes |
+| `widgetsessions` | Unique HMAC token hash; origin/visitor/assistant/organization, EN/TR locale; expiry TTL |
+| `widgetrequests` | Unique `(organizationId,assistantId,visitorId,clientMessageId)`; status, conversation queue, and action lookup indexes; EN/TR locale |
 | `budgetwindows` | Unique `(organizationId,kind,periodStart)`; spent, reserved, and limit micros |
 | `usageevents` | `(organizationId,createdAt)`; `(requestId,billingStatus)`; model, total input/output tokens, reported cache-read/cache-write/reasoning tokens, usage-breakdown flag, measured or uncertain estimated cost |
 | `ratecounters` | Unique hashed window key; expiry TTL |
 | `auditevents` | `(organizationId,createdAt)`; actor, action, target, result |
+| `staffavailabilities` | Unique `(organizationId,staffId)`; weekly local windows |
+| `customers` | `(organizationId,updatedAt)` and conversation association; minimal contact/request and consent metadata |
+| `appointments` | `(organizationId,startAt)`, `(organizationId,staffId,startAt)`, visitor; UTC start/end, booked/cancelled status |
+| `appointmentslots` | Unique `(organizationId,staffId,startAt)` for 15-minute UTC occupancy; appointment reference |
+| `agentactions` | Unique `(organizationId,idempotencyKey)`; validated name/arguments, pending/completed/failed status, result, confirmation expiry, actor or visitor, EN/TR locale |
 
-All tenant-owned reads and mutations require an organization predicate. MongoDB does not provide application row-level security. The daily retention worker removes expired conversations, messages, and requests; usage and audit ledgers remain until full tenant deletion. Backups have separate retention.
+All tenant-owned reads and mutations require an organization predicate. MongoDB does not provide application row-level security. The daily retention worker removes expired conversations, messages, and requests; it also removes old action/customer records and old appointments with their slot claims after the configured period. Usage and staff audit ledgers remain until full tenant deletion. Backups have separate retention. Existing organizations without scheduling fields behave as UTC and closed until configured.

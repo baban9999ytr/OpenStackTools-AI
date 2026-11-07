@@ -22,3 +22,11 @@ An owner registers and verifies an email. Owner-created invitations are emailed 
 ## Future adapters
 
 A future channel adapter should verify provider webhook signatures on the raw body, normalize inbound messages, emit outbound messages, map delivery status, and declare channel capabilities. Provider event IDs need tenant-scoped unique indexes and queued idempotent processing. These adapters are not in the pilot.
+
+## Phase 5 receptionist actions
+
+The existing website message queue and budget reservation remain the entry point for model requests. The Chat Completions adapter advertises six named function tools; it treats a returned tool call as data and never runs model-supplied code. The backend validates the name and strict Zod arguments, then creates a tenant-scoped `AgentAction` keyed by the durable widget request ID. Only one function call is accepted per response. Availability is computed from configured IANA time zone, organization opening windows, staff windows, and occupied 15-minute slot claims. The backend formats availability and action results; it does not copy the model's success claim into the answer.
+
+Booking, rescheduling, cancellation, and customer-record creation become 15-minute-expiring proposals. A visitor must press Confirm in the origin-bound widget session. Confirmation checks that the originating widget request completed, rechecks the visitor and assistant, and runs the operation and action-state update in a MongoDB transaction. Staff use role-checked organization routes with an explicit confirmation field. Repeated action keys return the same result; changed arguments under a reused key are rejected. A unique `(organizationId,staffId,startAt)` slot index prevents simultaneous bookings. The action history omits raw arguments from the staff list response; tenant export remains owner-only. Existing human handoff state and inbox are reused.
+
+The initial dashboard exposes appointments, a backend availability search, business hours, staff availability, customer requests, and action history. Staff schedules start closed until an owner or admin configures them. No external calendar, WhatsApp, or billing integration exists.

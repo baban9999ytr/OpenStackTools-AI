@@ -98,6 +98,7 @@ The explicit live OpenAI and SMTP checks require operator-set opt-in flags and d
 - [Phase 3 readiness report](PHASE3_PILOT_READINESS_REPORT.md)
 - [Phase 4A local staging report](PHASE4A_LOCAL_STAGING_REPORT.md)
 - [GPT-6 Luna verification report](MODEL_VERIFICATION_REPORT.md)
+- [Phase 5 receptionist actions report](PHASE5_AGENT_ACTIONS_REPORT.md)
 - [Local HTTPS staging runbook](LOCAL_HTTPS_STAGING_RUNBOOK.md)
 - [Live provider verification gates](LIVE_PROVIDER_VERIFICATION.md)
 - [Staging runbook](STAGING_RUNBOOK.md)

@@ -1,0 +1,24 @@
+http://ai.localhost {
+  redir https://ai.localhost{uri} permanent
+}
+
+https://ai.localhost {
+  tls /run/local-secrets/ai.localhost.crt /run/local-secrets/ai.localhost.key
+  encode zstd gzip
+  header Strict-Transport-Security "max-age=300"
+
+  @privateReady path /health/ready
+  handle @privateReady {
+    respond 404
+  }
+
+  handle /api/* {
+    reverse_proxy api:5000
+  }
+  handle /health/live {
+    reverse_proxy api:5000
+  }
+  handle {
+    reverse_proxy web:5173
+  }
+}

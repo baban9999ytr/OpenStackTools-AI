@@ -1,0 +1,105 @@
+name: ost-ai-local-https
+
+services:
+  mongo:
+    image: mongo:8
+    env_file: ./.secrets/mongo.env
+    entrypoint: ["bash", "/run/local-config/start-mongo.sh"]
+    volumes:
+      - mongo_data:/data/db
+      - ./.secrets/mongo-keyfile:/run/local-secrets/mongo-keyfile:ro
+      - ./start-mongo.sh:/run/local-config/start-mongo.sh:ro
+      - ./backup-restore.sh:/run/local-config/backup-restore.sh:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ ping: 1 }).ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  mongo-init:
+    image: mongo:8
+    env_file: ./.secrets/mongo.env
+    entrypoint: ["bash", "/run/local-config/init-mongo.sh"]
+    volumes:
+      - ./init-mongo.sh:/run/local-config/init-mongo.sh:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    command:
+      - --smtp-tls-cert
+      - /run/local-secrets/mailpit.crt
+      - --smtp-tls-key
+      - /run/local-secrets/mailpit.key
+      - --smtp-require-starttls
+      - --smtp-allowed-recipients
+      - ^[^@]+@example[.]test$
+    volumes:
+      - ./.secrets/mailpit.crt:/run/local-secrets/mailpit.crt:ro
+      - ./.secrets/mailpit.key:/run/local-secrets/mailpit.key:ro
+    ports:
+      - "127.0.0.1:8026:8025"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    env_file: ./.secrets/api.env
+    environment:
+      NODE_EXTRA_CA_CERTS: /run/local-secrets/root-ca.crt
+    volumes:
+      - ./.secrets/root-ca.crt:/run/local-secrets/root-ca.crt:ro
+    expose:
+      - "5000"
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+    init: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    environment:
+      API_UPSTREAM: http://api:5000
+    expose:
+      - "5173"
+    depends_on:
+      - api
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  edge:
+    image: caddy:2-alpine
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./.secrets/ai.localhost.crt:/run/local-secrets/ai.localhost.crt:ro
+      - ./.secrets/ai.localhost.key:/run/local-secrets/ai.localhost.key:ro
+    ports:
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:443:443"
+    depends_on:
+      - web
+      - api
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  mongo_data:

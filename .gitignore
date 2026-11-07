@@ -8,3 +8,5 @@ test-results/
 playwright-report/
 .DS_Store
 apps/web/public/embed.js
+deploy/local-https/.secrets/
+__pycache__/

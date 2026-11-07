@@ -5,3 +5,5 @@ dist
 **/node_modules
 **/.env
 **/.env.*
+deploy/local-https/.secrets
+**/__pycache__

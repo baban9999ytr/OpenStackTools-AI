@@ -13,6 +13,7 @@ export const env = {
   sessionSecret: must("SESSION_SECRET"),
   openaiApiKey: must("OPENAI_API_KEY"),
   openaiModel: must("OPENAI_MODEL"),
+  maxCompletionTokens: Number(process.env.OPENAI_MAX_COMPLETION_TOKENS ?? 800),
   defaultDailyBudgetMicros: parseUsdMicros(must("DEFAULT_DAILY_BUDGET_USD")),
   defaultMonthlyBudgetMicros: parseUsdMicros(
     must("DEFAULT_MONTHLY_BUDGET_USD"),
@@ -46,6 +47,8 @@ if (env.nodeEnv === "production" && new URL(env.dashboardOrigin).protocol !== "h
   throw new Error("Production DASHBOARD_ORIGIN must use HTTPS");
 if (!Number.isInteger(env.smtpPort) || env.smtpPort < 1 || env.smtpPort > 65535)
   throw new Error("Invalid SMTP_PORT");
+if (!Number.isInteger(env.maxCompletionTokens) || env.maxCompletionTokens < 1 || env.maxCompletionTokens > 800)
+  throw new Error("OPENAI_MAX_COMPLETION_TOKENS must be between 1 and 800");
 
 if (env.defaultMonthlyBudgetMicros < env.defaultDailyBudgetMicros)
   throw new Error("Monthly budget must be at least the daily budget");

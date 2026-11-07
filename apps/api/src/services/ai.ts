@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { env } from "../config/env.js";
-export const MAX_COMPLETION_TOKENS = 800;
+export const MAX_COMPLETION_TOKENS = env.maxCompletionTokens;
 export type Turn = { role: "customer" | "assistant" | "agent"; text: string };
 export type AIReply = {
   text: string;

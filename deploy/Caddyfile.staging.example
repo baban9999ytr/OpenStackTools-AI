@@ -3,7 +3,9 @@
   encode zstd gzip
   header Strict-Transport-Security "max-age=31536000"
   @privateReady path /health/ready
-  respond @privateReady 404
+  handle @privateReady {
+    respond 404
+  }
   handle /api/* {
     reverse_proxy api:5000
   }

@@ -13,6 +13,7 @@ export const env = {
   sessionSecret: must("SESSION_SECRET"),
   openaiApiKey: must("OPENAI_API_KEY"),
   openaiModel: must("OPENAI_MODEL"),
+  reasoningEffort: process.env.OPENAI_REASONING_EFFORT?.trim() || undefined,
   maxCompletionTokens: Number(process.env.OPENAI_MAX_COMPLETION_TOKENS ?? 800),
   defaultDailyBudgetMicros: parseUsdMicros(must("DEFAULT_DAILY_BUDGET_USD")),
   defaultMonthlyBudgetMicros: parseUsdMicros(
@@ -23,6 +24,14 @@ export const env = {
   ),
   outputPriceMicrosPerMillion: parseUsdMicros(
     must("OPENAI_OUTPUT_USD_PER_MILLION_TOKENS"),
+  ),
+  cachedInputPriceMicrosPerMillion: parseUsdMicros(
+    process.env.OPENAI_CACHED_INPUT_USD_PER_MILLION_TOKENS?.trim() ||
+      must("OPENAI_INPUT_USD_PER_MILLION_TOKENS"),
+  ),
+  cacheWritePriceMicrosPerMillion: parseUsdMicros(
+    process.env.OPENAI_CACHE_WRITE_USD_PER_MILLION_TOKENS?.trim() ||
+      must("OPENAI_INPUT_USD_PER_MILLION_TOKENS"),
   ),
   cookieSecure:
     process.env.COOKIE_SECURE === "true" ||
@@ -49,8 +58,14 @@ if (!Number.isInteger(env.smtpPort) || env.smtpPort < 1 || env.smtpPort > 65535)
   throw new Error("Invalid SMTP_PORT");
 if (!Number.isInteger(env.maxCompletionTokens) || env.maxCompletionTokens < 1 || env.maxCompletionTokens > 800)
   throw new Error("OPENAI_MAX_COMPLETION_TOKENS must be between 1 and 800");
+if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(env.openaiModel))
+  throw new Error("Invalid OPENAI_MODEL identifier");
+if (env.reasoningEffort && !["none", "low", "medium", "high", "xhigh", "max"].includes(env.reasoningEffort))
+  throw new Error("Invalid OPENAI_REASONING_EFFORT");
 
 if (env.defaultMonthlyBudgetMicros < env.defaultDailyBudgetMicros)
   throw new Error("Monthly budget must be at least the daily budget");
 if (!env.inputPriceMicrosPerMillion || !env.outputPriceMicrosPerMillion)
   throw new Error("AI prices must be positive");
+if (!env.cachedInputPriceMicrosPerMillion || !env.cacheWritePriceMicrosPerMillion)
+  throw new Error("AI cache prices must be positive");

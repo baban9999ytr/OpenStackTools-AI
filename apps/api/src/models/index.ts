@@ -218,6 +218,10 @@ const usageEventSchema = new Schema(
     model: { type: String, required: true },
     inputTokens: { type: Number, required: true, min: 0 },
     outputTokens: { type: Number, required: true, min: 0 },
+    cachedInputTokens: { type: Number, default: 0, min: 0 },
+    cacheWriteTokens: { type: Number, default: 0, min: 0 },
+    reasoningTokens: { type: Number, default: 0, min: 0 },
+    usageBreakdownKnown: { type: Boolean, default: false },
     estimatedCostMicros: { type: Number, required: true, min: 0 },
     billingStatus: {
       type: String,

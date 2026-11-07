@@ -114,6 +114,9 @@ router.get(
     const [totals] = await UsageEvent.aggregate<{
       inputTokens: number;
       outputTokens: number;
+      cachedInputTokens: number;
+      cacheWriteTokens: number;
+      reasoningTokens: number;
       estimatedCostMicros: number;
     }>([
       { $match: { organizationId: res.locals.organizationId } },
@@ -122,6 +125,9 @@ router.get(
           _id: null,
           inputTokens: { $sum: "$inputTokens" },
           outputTokens: { $sum: "$outputTokens" },
+          cachedInputTokens: { $sum: "$cachedInputTokens" },
+          cacheWriteTokens: { $sum: "$cacheWriteTokens" },
+          reasoningTokens: { $sum: "$reasoningTokens" },
           estimatedCostMicros: { $sum: "$estimatedCostMicros" },
         },
       },
@@ -130,6 +136,9 @@ router.get(
       totals: totals ?? {
         inputTokens: 0,
         outputTokens: 0,
+        cachedInputTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
         estimatedCostMicros: 0,
       },
       recentEvents: events,

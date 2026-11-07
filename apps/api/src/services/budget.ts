@@ -15,9 +15,38 @@ export const utcPeriods = (now = new Date()) => ({
   ),
   month: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
 });
-export const measuredCostMicros = (inputTokens: number, outputTokens: number) =>
-  costMicros(inputTokens, env.inputPriceMicrosPerMillion) +
-  costMicros(outputTokens, env.outputPriceMicrosPerMillion);
+export const measuredCostMicros = (
+  inputTokens: number,
+  outputTokens: number,
+  details: {
+    cachedInputTokens?: number;
+    cacheWriteTokens?: number;
+    usageBreakdownKnown?: boolean;
+  } = {},
+) => {
+  const cached = details.cachedInputTokens ?? 0;
+  const written = details.cacheWriteTokens ?? 0;
+  if (
+    ![inputTokens, outputTokens, cached, written].every(
+      (count) => Number.isSafeInteger(count) && count >= 0,
+    ) || cached + written > inputTokens
+  ) throw new Error("Invalid provider token breakdown");
+  const inputCost = details.usageBreakdownKnown
+    ? costMicros(inputTokens - cached - written, env.inputPriceMicrosPerMillion) +
+      costMicros(cached, env.cachedInputPriceMicrosPerMillion) +
+      costMicros(written, env.cacheWritePriceMicrosPerMillion)
+    : costMicros(
+        inputTokens,
+        Math.max(
+          env.inputPriceMicrosPerMillion,
+          env.cachedInputPriceMicrosPerMillion,
+          env.cacheWritePriceMicrosPerMillion,
+        ),
+      );
+  const total = inputCost + costMicros(outputTokens, env.outputPriceMicrosPerMillion);
+  if (!Number.isSafeInteger(total)) throw new Error("Estimated cost is too large");
+  return total;
+};
 
 // Deliberately conservative: byte count is multiplied before adding a fixed
 // allowance for message framing. Actual provider usage is reconciled afterward.
@@ -31,7 +60,9 @@ export const maximumReservationMicros = (
   const upperInputTokens = bytes * 4 + 4096;
   if (!Number.isSafeInteger(upperInputTokens))
     throw new Error("Context too large");
-  return measuredCostMicros(upperInputTokens, MAX_COMPLETION_TOKENS);
+  // A cache write can cost more than ordinary input. Reserve for that worst
+  // case; three microdollars cover per-category rounding on settlement.
+  return measuredCostMicros(upperInputTokens, MAX_COMPLETION_TOKENS) + 3;
 };
 
 const ensureWindow = async (

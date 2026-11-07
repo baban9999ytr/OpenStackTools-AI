@@ -7,7 +7,7 @@ import {
   WidgetRequest,
   WidgetSession,
 } from "../models/index.js";
-import { providerFailurePolicy, type AIResponder, type Turn } from "./ai.js";
+import { providerFailurePolicy, type AIReply, type AIResponder, type Turn } from "./ai.js";
 import {
   BudgetExceeded,
   maximumReservationMicros,
@@ -218,11 +218,12 @@ const finalizeFailure = async (
 
 const finalizeSuccess = async (
   requestId: mongoose.Types.ObjectId,
-  answer: { text: string; inputTokens: number; outputTokens: number },
+  answer: AIReply,
 ) => {
   const actualMicros = measuredCostMicros(
     answer.inputTokens,
     answer.outputTokens,
+    answer,
   );
   const session = await mongoose.startSession();
   try {
@@ -252,6 +253,10 @@ const finalizeSuccess = async (
             model: env.openaiModel,
             inputTokens: answer.inputTokens,
             outputTokens: answer.outputTokens,
+            cachedInputTokens: answer.cachedInputTokens ?? 0,
+            cacheWriteTokens: answer.cacheWriteTokens ?? 0,
+            reasoningTokens: answer.reasoningTokens ?? 0,
+            usageBreakdownKnown: answer.usageBreakdownKnown ?? false,
             estimatedCostMicros: actualMicros,
             billingStatus: "measured",
           },

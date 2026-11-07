@@ -575,6 +575,7 @@ test("ambiguous provider failure is charged conservatively and never replayed", 
   await processPendingRequests(responder);
   const queued = await WidgetRequest.findOne({ clientMessageId });
   assert.equal(queued?.status, "failed");
+  assert.equal(queued?.errorCode, "provider_unavailable");
   assert.equal(attempts, 1);
   assert.equal(await Message.countDocuments({ requestId: queued?._id }), 1);
   assert.equal(
@@ -603,7 +604,11 @@ test("provider 429 is retried once without uncertain billing", async () => {
     attempts++;
     if (attempts === 1)
       throw Object.assign(new Error("provider rate limit"), { status: 429 });
-    return { text: "Recovered", inputTokens: 8, outputTokens: 3 };
+    return {
+      text: "Recovered", inputTokens: 8, outputTokens: 3,
+      cachedInputTokens: 2, cacheWriteTokens: 1, reasoningTokens: 1,
+      usageBreakdownKnown: true,
+    };
   };
   const retryApp = createApp(responder);
   const clientMessageId = crypto.randomUUID();
@@ -619,6 +624,11 @@ test("provider 429 is retried once without uncertain billing", async () => {
   assert.equal(attempts, 2);
   assert.equal(await UsageEvent.countDocuments({ requestId: queued?._id, billingStatus: "uncertain" }), 0);
   assert.equal(await UsageEvent.countDocuments({ requestId: queued?._id, billingStatus: "measured" }), 1);
+  const usage = await UsageEvent.findOne({ requestId: queued?._id }).lean();
+  assert.equal(usage?.cachedInputTokens, 2);
+  assert.equal(usage?.cacheWriteTokens, 1);
+  assert.equal(usage?.reasoningTokens, 1);
+  assert.equal(usage?.usageBreakdownKnown, true);
 });
 
 test("unavailable model returns a generic error without replay or cost", async () => {
@@ -645,6 +655,7 @@ test("unavailable model returns a generic error without replay or cost", async (
   });
   const queued = await WidgetRequest.findOne({ clientMessageId });
   assert.equal(queued?.status, "failed");
+  assert.equal(queued?.errorCode, "provider_model_unavailable");
   assert.equal(attempts, 1);
   assert.equal(await UsageEvent.countDocuments({ requestId: queued?._id }), 0);
 });

@@ -253,6 +253,9 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
   const [usage, setUsage] = useState<{
     inputTokens: number;
     outputTokens: number;
+    cachedInputTokens: number;
+    cacheWriteTokens: number;
+    reasoningTokens: number;
     estimatedCostMicros: number;
   } | null>(null);
   const [budget, setBudget] = useState<{
@@ -794,6 +797,18 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
               <div>
                 <strong>{usage?.outputTokens ?? 0}</strong>
                 <span>{t("Output tokens")}</span>
+              </div>
+              <div>
+                <strong>{usage?.cachedInputTokens ?? 0}</strong>
+                <span>{t("Cached input tokens")}</span>
+              </div>
+              <div>
+                <strong>{usage?.cacheWriteTokens ?? 0}</strong>
+                <span>{t("Cache write tokens")}</span>
+              </div>
+              <div>
+                <strong>{usage?.reasoningTokens ?? 0}</strong>
+                <span>{t("Reasoning tokens")}</span>
               </div>
               <div>
                 <strong>

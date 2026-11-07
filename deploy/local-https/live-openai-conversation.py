@@ -23,7 +23,7 @@ settings = dict(
 if settings.get("OPENAI_API_KEY", "").startswith(("local-", "replace-")) or not settings.get("OPENAI_API_KEY"):
     raise SystemExit("Configure a dedicated provider key in the ignored local API environment first")
 if settings.get("OPENAI_MODEL", "").startswith(("local-", "replace-")) or not settings.get("OPENAI_MODEL"):
-    raise SystemExit("Configure a supported inexpensive chat model first")
+    raise SystemExit("Configure the verified GPT-6 Luna API model identifier first")
 if settings["OPENAI_MODEL"] != "gpt-6-luna" or settings.get("OPENAI_REASONING_EFFORT") != "none":
     raise SystemExit("This Phase 4B check requires GPT-6 Luna with reasoning effort none")
 if int(settings.get("OPENAI_MAX_COMPLETION_TOKENS", "800")) > 128:

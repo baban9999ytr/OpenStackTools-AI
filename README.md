@@ -57,9 +57,11 @@ The widget follows the embedding page's `lang` and `data-theme` where set. Optio
 | `MONGODB_URL` | MongoDB replica set URL |
 | `SESSION_SECRET` | Secret used to hash opaque session tokens; never expose to the browser |
 | `OPENAI_API_KEY` | Server-side provider key |
-| `OPENAI_MODEL` | Configured Chat Completions model |
+| `OPENAI_MODEL` / `OPENAI_REASONING_EFFORT` | Chat Completions model and optional reasoning level; examples use `gpt-6-luna` with `none` |
+| `OPENAI_MAX_COMPLETION_TOKENS` | Maximum output including reasoning tokens (1–800) |
 | `DEFAULT_DAILY_BUDGET_USD` / `DEFAULT_MONTHLY_BUDGET_USD` | New-organization AI spend caps in USD |
 | `OPENAI_INPUT_USD_PER_MILLION_TOKENS` / `OPENAI_OUTPUT_USD_PER_MILLION_TOKENS` | Current model prices used for cost estimates and budget reservations |
+| `OPENAI_CACHED_INPUT_USD_PER_MILLION_TOKENS` / `OPENAI_CACHE_WRITE_USD_PER_MILLION_TOKENS` | Cache rates; if omitted, both use the ordinary input rate conservatively |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_FROM` | Account email; optional `SMTP_USER` and `SMTP_PASSWORD` |
 | `DASHBOARD_ORIGIN` | Exact dashboard browser origin (without `/app`) used for CORS, CSRF, and account links |
 | `PORT` | API port, default 5000 |
@@ -95,6 +97,7 @@ The explicit live OpenAI and SMTP checks require operator-set opt-in flags and d
 - [Deployment preparation](docs/DEPLOYMENT.md)
 - [Phase 3 readiness report](PHASE3_PILOT_READINESS_REPORT.md)
 - [Phase 4A local staging report](PHASE4A_LOCAL_STAGING_REPORT.md)
+- [GPT-6 Luna verification report](MODEL_VERIFICATION_REPORT.md)
 - [Local HTTPS staging runbook](LOCAL_HTTPS_STAGING_RUNBOOK.md)
 - [Live provider verification gates](LIVE_PROVIDER_VERIFICATION.md)
 - [Staging runbook](STAGING_RUNBOOK.md)

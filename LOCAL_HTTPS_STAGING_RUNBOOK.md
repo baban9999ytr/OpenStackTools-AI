@@ -12,7 +12,7 @@ deploy/local-https/trust-browser-ca.sh
 docker compose -f deploy/local-https/compose.yaml up -d --build
 ```
 
-`setup.sh` generates an ignored `.secrets` directory with a local CA, hostname-matched leaf certificates, a MongoDB replica-set keyfile, dedicated random database credentials, a session secret, and `api.env`. It preserves existing secrets on repeat runs. The generated OpenAI key/model and prices are inert placeholders. **Do not send a live AI request until a dedicated key, supported model, verified prices, and a low spending target are configured and approved.** The stack's Mailpit accepts only `@example.test` recipients and requires STARTTLS, so synthetic account tests cannot send to customers.
+`setup.sh` generates an ignored `.secrets` directory with a local CA, hostname-matched leaf certificates, a MongoDB replica-set keyfile, dedicated random database credentials, a session secret, and `api.env`. It preserves existing secrets on repeat runs. The generated OpenAI key is an inert placeholder; the sample `gpt-6-luna` model and Standard prices reflect the official documentation checked for Phase 4B and must be reverified before live use. **Do not send a live AI request until a dedicated key, project model access, current prices, and a low spending target are configured and approved.** The stack's Mailpit accepts only `@example.test` recipients and requires STARTTLS, so synthetic account tests cannot send to customers.
 
 The browser trust script adds only this local CA to the current user's Chromium NSS database. It does not turn off certificate validation or install a system-wide CA. `curl` should use the explicit CA file:
 

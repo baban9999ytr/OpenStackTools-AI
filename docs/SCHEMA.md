@@ -15,7 +15,7 @@
 | `widgetsessions` | Unique HMAC token hash; origin/visitor/assistant/organization; expiry TTL |
 | `widgetrequests` | Unique `(organizationId,assistantId,visitorId,clientMessageId)`; status and conversation queue indexes |
 | `budgetwindows` | Unique `(organizationId,kind,periodStart)`; spent, reserved, and limit micros |
-| `usageevents` | `(organizationId,createdAt)`; `(requestId,billingStatus)`; model, tokens, measured or uncertain cost |
+| `usageevents` | `(organizationId,createdAt)`; `(requestId,billingStatus)`; model, total input/output tokens, reported cache-read/cache-write/reasoning tokens, usage-breakdown flag, measured or uncertain estimated cost |
 | `ratecounters` | Unique hashed window key; expiry TTL |
 | `auditevents` | `(organizationId,createdAt)`; actor, action, target, result |
 

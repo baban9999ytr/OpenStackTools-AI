@@ -33,18 +33,21 @@ MONGODB_URL=mongodb://local_app:$app_password@mongo:27017/ost_ai_local?replicaSe
 DASHBOARD_ORIGIN=https://ai.localhost
 SESSION_SECRET=$session_secret
 OPENAI_API_KEY=local-unconfigured-key
-OPENAI_MODEL=local-unconfigured-model
+OPENAI_MODEL=gpt-6-luna
+OPENAI_REASONING_EFFORT=none
 OPENAI_MAX_COMPLETION_TOKENS=64
 COOKIE_SECURE=true
 TRUST_PROXY=1
 DEFAULT_DAILY_BUDGET_USD=0.05
 DEFAULT_MONTHLY_BUDGET_USD=0.50
-OPENAI_INPUT_USD_PER_MILLION_TOKENS=1
-OPENAI_OUTPUT_USD_PER_MILLION_TOKENS=1
+OPENAI_INPUT_USD_PER_MILLION_TOKENS=0.10
+OPENAI_OUTPUT_USD_PER_MILLION_TOKENS=0.50
+OPENAI_CACHED_INPUT_USD_PER_MILLION_TOKENS=0.01
+OPENAI_CACHE_WRITE_USD_PER_MILLION_TOKENS=0.125
 SMTP_HOST=mailpit
 SMTP_PORT=1025
 SMTP_REQUIRE_TLS=true
 SMTP_FROM=OpenStackTools AI Local <no-reply@example.test>
 EOF
 echo 'Generated ignored local staging certificates and synthetic credentials.'
-echo 'OpenAI key/model and token prices are placeholders. Do not run a live provider request until replaced and authorized.'
+echo 'OpenAI key is an inert placeholder. Reverify published model prices and project access before an authorized live request.'

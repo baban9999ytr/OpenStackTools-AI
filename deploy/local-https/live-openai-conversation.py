@@ -2,11 +2,13 @@
 
 import json
 import os
+import subprocess
 import time
 import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
+from decimal import Decimal, ROUND_CEILING
 
 from smoke import BASE, Client, PASSWORD, expect, mail_token
 
@@ -22,6 +24,8 @@ if settings.get("OPENAI_API_KEY", "").startswith(("local-", "replace-")) or not 
     raise SystemExit("Configure a dedicated provider key in the ignored local API environment first")
 if settings.get("OPENAI_MODEL", "").startswith(("local-", "replace-")) or not settings.get("OPENAI_MODEL"):
     raise SystemExit("Configure a supported inexpensive chat model first")
+if settings["OPENAI_MODEL"] != "gpt-6-luna" or settings.get("OPENAI_REASONING_EFFORT") != "none":
+    raise SystemExit("This Phase 4B check requires GPT-6 Luna with reasoning effort none")
 if int(settings.get("OPENAI_MAX_COMPLETION_TOKENS", "800")) > 128:
     raise SystemExit("Set OPENAI_MAX_COMPLETION_TOKENS to at most 128 for this test")
 if float(settings.get("DEFAULT_DAILY_BUDGET_USD", "1")) > 0.10 or float(settings.get("DEFAULT_MONTHLY_BUDGET_USD", "1")) > 0.50:
@@ -64,6 +68,7 @@ try:
         "publicKey": assistant["assistant"]["publicKey"],
     }, 201)
     bearer = session["token"]
+    started = time.perf_counter()
     status, result = widget_request(widget, "POST", "/api/widget/messages", bearer, {
         "text": "Reply with a short greeting for a synthetic integration test.",
         "clientMessageId": str(uuid.uuid4()),
@@ -78,6 +83,7 @@ try:
         status, result = widget_request(widget, "GET", f"/api/widget/requests/{request_id}", bearer)
         assert status == 200
     assert result["status"] == "completed" and result["reply"], "One live request did not complete"
+    latency_ms = round((time.perf_counter() - started) * 1000)
     conversation_id = result["conversationId"]
     status, persisted = widget_request(widget, "GET", f"/api/widget/conversations/{conversation_id}/messages", bearer)
     assert status == 200
@@ -90,6 +96,20 @@ try:
     assert event["model"] == settings["OPENAI_MODEL"]
     assert event["inputTokens"] > 0 and event["outputTokens"] > 0
     assert event["estimatedCostMicros"] > 0 and event["billingStatus"] == "measured"
+    assert 0 <= event["cachedInputTokens"] + event["cacheWriteTokens"] <= event["inputTokens"]
+    assert 0 <= event["reasoningTokens"] <= event["outputTokens"]
+    price = lambda key: Decimal(settings[key])
+    ceil = lambda tokens, rate: int((Decimal(tokens) * rate).to_integral_value(rounding=ROUND_CEILING))
+    if event["usageBreakdownKnown"]:
+        input_cost = (
+            ceil(event["inputTokens"] - event["cachedInputTokens"] - event["cacheWriteTokens"], price("OPENAI_INPUT_USD_PER_MILLION_TOKENS")) +
+            ceil(event["cachedInputTokens"], price("OPENAI_CACHED_INPUT_USD_PER_MILLION_TOKENS")) +
+            ceil(event["cacheWriteTokens"], price("OPENAI_CACHE_WRITE_USD_PER_MILLION_TOKENS"))
+        )
+    else:
+        input_cost = ceil(event["inputTokens"], max(price("OPENAI_INPUT_USD_PER_MILLION_TOKENS"), price("OPENAI_CACHED_INPUT_USD_PER_MILLION_TOKENS"), price("OPENAI_CACHE_WRITE_USD_PER_MILLION_TOKENS")))
+    expected_cost = input_cost + ceil(event["outputTokens"], price("OPENAI_OUTPUT_USD_PER_MILLION_TOKENS"))
+    assert expected_cost == event["estimatedCostMicros"], "Recorded cost did not match configured prices"
     budgets, _ = expect(owner, "GET", f"/api/organizations/{organization_id}/budgets", None, 200)
     assert len(budgets["windows"]) == 2
     assert all(window["spentMicros"] == event["estimatedCostMicros"] and window["reservedMicros"] == 0 for window in budgets["windows"])
@@ -103,9 +123,16 @@ try:
     assert status == 402, f"Budget exhaustion returned HTTP {status}"
     usage_after, _ = expect(owner, "GET", f"/api/organizations/{organization_id}/export/usage", None, 200)
     assert len(usage_after["items"]) == 1, "Budget test unexpectedly made another provider call"
+    logs = subprocess.check_output([
+        "docker", "compose", "-f", str(HERE / "compose.yaml"), "logs", "--no-color", "api",
+    ], text=True)
+    assert settings["OPENAI_API_KEY"] not in logs and settings["SESSION_SECRET"] not in logs
     print(json.dumps({
         "status": "PASS-LIVE", "providerCalls": 1, "model": event["model"],
+        "latencyMs": latency_ms,
         "inputTokens": event["inputTokens"], "outputTokens": event["outputTokens"],
+        "cachedInputTokens": event["cachedInputTokens"], "cacheWriteTokens": event["cacheWriteTokens"],
+        "reasoningTokens": event["reasoningTokens"], "usageBreakdownKnown": event["usageBreakdownKnown"],
         "estimatedCostMicros": event["estimatedCostMicros"],
         "conversationPersisted": True, "budgetExhaustionBlocked": True,
     }))

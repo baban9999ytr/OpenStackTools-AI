@@ -1,11 +1,13 @@
 // Explicit opt-in: this sends one benign request to the configured model.
-if (process.env.OPENAI_LIVE_TEST !== "1")
-  throw new Error("Set OPENAI_LIVE_TEST=1 to authorize one provider request");
+if (process.env.OPENAI_LIVE_TEST !== "1" || process.env.LIVE_SPEND_APPROVED !== "1" || process.env.LIVE_PRICES_VERIFIED !== "1")
+  throw new Error("Live test requires OPENAI_LIVE_TEST=1, LIVE_SPEND_APPROVED=1 and LIVE_PRICES_VERIFIED=1");
 if (
   !process.env.OPENAI_API_KEY ||
   process.env.OPENAI_API_KEY.startsWith("replace-") ||
+  process.env.OPENAI_API_KEY.startsWith("local-") ||
   !process.env.OPENAI_MODEL ||
   process.env.OPENAI_MODEL.startsWith("replace-") ||
+  process.env.OPENAI_MODEL.startsWith("local-") ||
   !process.env.OPENAI_INPUT_USD_PER_MILLION_TOKENS ||
   !process.env.OPENAI_OUTPUT_USD_PER_MILLION_TOKENS
 ) throw new Error("Configure a real server-side key, model, and both model prices first");
@@ -22,6 +24,7 @@ process.env.SMTP_FROM ??= "OpenStackTools AI <no-reply@example.invalid>";
 
 const { openAIResponder } = await import("../src/services/ai.js");
 const { measuredCostMicros } = await import("../src/services/budget.js");
+const started = performance.now();
 const answer = await openAIResponder(
   "Reply with one short, harmless sentence. Do not use tools.",
   [{ role: "customer", text: "This is an authorized provider integration check." }],
@@ -36,7 +39,12 @@ if (
 console.log(JSON.stringify({
   status: "provider response received",
   model: process.env.OPENAI_MODEL,
+  latencyMs: Math.round(performance.now() - started),
   inputTokens: answer.inputTokens,
   outputTokens: answer.outputTokens,
-  estimatedCostMicros: measuredCostMicros(answer.inputTokens, answer.outputTokens),
+  cachedInputTokens: answer.cachedInputTokens,
+  cacheWriteTokens: answer.cacheWriteTokens,
+  reasoningTokens: answer.reasoningTokens,
+  usageBreakdownKnown: answer.usageBreakdownKnown,
+  estimatedCostMicros: measuredCostMicros(answer.inputTokens, answer.outputTokens, answer),
 }));

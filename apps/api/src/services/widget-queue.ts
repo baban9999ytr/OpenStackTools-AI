@@ -1,9 +1,13 @@
 import mongoose from "mongoose";
 import {
   Assistant,
+  Appointment,
   Conversation,
   Message,
+  Membership,
+  Organization,
   UsageEvent,
+  User,
   WidgetRequest,
   WidgetSession,
 } from "../models/index.js";
@@ -17,9 +21,13 @@ import {
 } from "./budget.js";
 import { env } from "../config/env.js";
 import { logger, safeError } from "../config/logger.js";
+import { ActionError, actionReply, stageAction } from "./agent-actions.js";
+import { AppointmentError } from "./appointments.js";
 
 const LEASE_MS = 120_000;
 const MAX_ATTEMPTS = 2;
+export const buildReceptionistInstructions = (instructions: string, timeZone: string, staff: Array<{ name: string; id: string }>, bookings: Array<{ id: string; startAt: string }> = []) =>
+  instructions + `\nReceptionist rules: Use check_availability for real appointment times. Never invent available slots or claim a booking changed before the backend confirms it. Booking, rescheduling, cancellation and customer-record creation require a separate visitor confirmation. Use handoff_to_human when staff intervention is needed. Business time zone: ${timeZone}. Staff: ${staff.map((person) => `${person.name} (${person.id})`).join(", ") || "none configured"}. This visitor's active bookings: ${bookings.map((booking) => `${booking.id} at ${booking.startAt}`).join(", ") || "none"}.`;
 export class WidgetConflict extends Error {}
 export class WidgetNotFound extends Error {}
 
@@ -28,6 +36,7 @@ type WidgetIdentity = {
   organizationId: mongoose.Types.ObjectId;
   assistantId: mongoose.Types.ObjectId;
   visitorId: string;
+  locale?: "en" | "tr";
 };
 export const enqueueWidgetMessage = async (
   identity: WidgetIdentity,
@@ -92,6 +101,7 @@ export const enqueueWidgetMessage = async (
             ...key,
             conversationId: conversation._id,
             text: input.text,
+            locale: freshIdentity.locale ?? "en",
             status: "queued",
           },
         ],
@@ -218,7 +228,7 @@ const finalizeFailure = async (
 
 const finalizeSuccess = async (
   requestId: mongoose.Types.ObjectId,
-  answer: AIReply,
+  answer: AIReply & { actionId?: mongoose.Types.ObjectId },
 ) => {
   const actualMicros = measuredCostMicros(
     answer.inputTokens,
@@ -286,6 +296,7 @@ const finalizeSuccess = async (
             status: conversation.status === "bot" ? "completed" : "handoff",
             reservedMicros: 0,
             ...(responseMessageId ? { responseMessageId } : {}),
+            ...(answer.actionId ? { actionId: answer.actionId } : {}),
           },
           $unset: {
             leaseUntil: 1,
@@ -408,14 +419,37 @@ export const processWidgetRequest = async (
         .map((item) => ({ role: item.role as Turn["role"], text: item.text })),
       { role: "customer", text: request.text },
     ];
+    const [organization, staffMembers, bookings] = await Promise.all([
+      Organization.findById(request.organizationId).select("timeZone").lean(),
+      Membership.find({ organizationId: request.organizationId, role: { $in: ["owner", "admin", "agent"] } }).lean(),
+      Appointment.find({ organizationId: request.organizationId, visitorId: request.visitorId, status: "booked" }).sort({ startAt: 1 }).limit(10).select("startAt").lean(),
+    ]);
+    const staff = await User.find({ _id: { $in: staffMembers.map((member) => member.userId) } }).select("name").lean();
+    const fullInstructions = buildReceptionistInstructions(assistant.instructions,
+      organization?.timeZone ?? "UTC", staff.map((person) => ({ name: person.name, id: person._id.toString() })),
+      bookings.map((booking) => ({ id: booking._id.toString(), startAt: booking.startAt.toISOString() })));
     const reservation = maximumReservationMicros(
-      assistant.instructions,
+      fullInstructions,
       history,
     );
     if (!(await reserveBudget(requestId, reservation)))
       throw new Error("Request lease was lost");
     await recordCustomerMessage(claimed);
-    const answer = await respond(assistant.instructions, history);
+    const answer = await respond(fullInstructions, history);
+    if (answer.action) {
+      try {
+        const action = await stageAction({ organizationId: request.organizationId,
+          assistantId: request.assistantId, conversationId: request.conversationId,
+          visitorId: request.visitorId,
+          locale: request.locale ?? "en",
+        }, answer.action as { name: import("./agent-actions.js").ActionName; arguments: unknown }, `widget:${requestId.toString()}`);
+        answer.text = actionReply(action);
+        (answer as AIReply & { actionId?: mongoose.Types.ObjectId }).actionId = action._id;
+      } catch (error) {
+        if (!(error instanceof ActionError || error instanceof AppointmentError)) throw error;
+        answer.text = "I could not validate that action. Please provide the missing details or ask a team member for help.";
+      }
+    }
     await finalizeSuccess(requestId, answer);
   } catch (error) {
     if (error instanceof BudgetExceeded)

@@ -4,14 +4,19 @@ import { compare } from "bcrypt";
 import { z } from "zod";
 import {
   AccountToken,
+  AgentAction,
+  Appointment,
+  AppointmentSlot,
   Assistant,
   AuditEvent,
   BudgetWindow,
   Conversation,
+  Customer,
   Membership,
   Message,
   Organization,
   Session,
+  StaffAvailability,
   UsageEvent,
   User,
   WidgetRequest,
@@ -32,6 +37,11 @@ const scoped = {
   requests: WidgetRequest,
   widgetSessions: WidgetSession,
   budgets: BudgetWindow,
+  appointments: Appointment,
+  appointmentSlots: AppointmentSlot,
+  customers: Customer,
+  agentActions: AgentAction,
+  staffAvailability: StaffAvailability,
 };
 router.get(
   "/:organizationId/export/:kind",
@@ -147,7 +157,11 @@ router.delete(
           .lean();
         for (const model of [
           Assistant,
+          AgentAction,
+          Appointment,
+          AppointmentSlot,
           Conversation,
+          Customer,
           Message,
           UsageEvent,
           WidgetRequest,
@@ -156,6 +170,7 @@ router.delete(
           AuditEvent,
           AccountToken,
           Membership,
+          StaffAvailability,
         ])
           await mongoose.connection
             .collection(model.collection.name)

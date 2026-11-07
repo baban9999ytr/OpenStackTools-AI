@@ -4,6 +4,7 @@ export const MAX_COMPLETION_TOKENS = env.maxCompletionTokens;
 export type Turn = { role: "customer" | "assistant" | "agent"; text: string };
 export type AIReply = {
   text: string;
+  action?: { name: string; arguments: unknown };
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens?: number;
@@ -23,6 +24,22 @@ const client = new OpenAI({
   // decides whether a new attempt is safe; the SDK must not replay it.
   maxRetries: 0,
 });
+const objectId = { type: "string", description: "Backend identifier supplied by the business or a prior result" };
+const date = { type: "string", description: "Business-local date, YYYY-MM-DD" };
+const startAt = { type: "string", description: "Exact UTC or offset ISO timestamp from check_availability" };
+const duration = { type: "integer", enum: [15, 30, 45, 60, 90, 120] };
+const tool = (name: string, description: string, properties: Record<string, unknown>, required: string[]) => ({
+  type: "function" as const,
+  function: { name, description, parameters: { type: "object", properties, required, additionalProperties: false } },
+});
+const receptionistTools = [
+  tool("check_availability", "Read real available appointment times. Never invent a time.", { staffId: objectId, date, durationMinutes: duration }, ["staffId", "date", "durationMinutes"]),
+  tool("create_appointment", "Propose a booking; a visitor confirmation is required before it is made.", { staffId: objectId, startAt, durationMinutes: duration }, ["staffId", "startAt", "durationMinutes"]),
+  tool("reschedule_appointment", "Propose moving a booking owned by this visitor; confirmation is required.", { appointmentId: objectId, startAt, durationMinutes: duration }, ["appointmentId", "startAt", "durationMinutes"]),
+  tool("cancel_appointment", "Propose cancelling a booking owned by this visitor; confirmation is required.", { appointmentId: objectId }, ["appointmentId"]),
+  tool("create_customer", "Propose a minimal customer record only from details the visitor supplied and agreed to save.", { name: { type: "string" }, contact: { type: "string" }, request: { type: "string" }, consentRecorded: { type: "boolean" } }, ["name", "contact", "request", "consentRecorded"]),
+  tool("handoff_to_human", "Transfer this conversation to a human staff member.", { reason: { type: "string" } }, ["reason"]),
+];
 export const providerFailurePolicy = (error: unknown) => {
   const status =
     error && typeof error === "object" && "status" in error
@@ -50,14 +67,25 @@ export const openAIResponder: AIResponder = async (instructions, history) => {
       })),
     ],
     max_completion_tokens: MAX_COMPLETION_TOKENS,
+    tools: receptionistTools,
+    parallel_tool_calls: false,
     service_tier: "default",
     ...(env.reasoningEffort ? { reasoning_effort: env.reasoningEffort as "none" | "low" | "medium" | "high" | "xhigh" | "max" } : {}),
   });
   return parseAIReply(response);
 };
 export const parseAIReply = (response: OpenAI.Chat.Completions.ChatCompletion): AIReply => {
-  const text = response.choices[0]?.message.content;
-  if (!text?.trim()) throw new Error("Empty AI response");
+  const message = response.choices[0]?.message;
+  const toolCalls = message?.tool_calls ?? [];
+  if (toolCalls.length > 1) throw new Error("Multiple AI actions are not supported");
+  let action: AIReply["action"];
+  if (toolCalls.length === 1) {
+    const call = toolCalls[0];
+    if (call?.type !== "function" || call.function.arguments.length > 4000) throw new Error("Invalid AI action");
+    action = { name: call.function.name, arguments: JSON.parse(call.function.arguments) as unknown };
+  }
+  const text = message?.content?.trim() ?? "";
+  if (!text && !action) throw new Error("Empty AI response");
   if (
     !response.usage ||
     !Number.isSafeInteger(response.usage.prompt_tokens) ||
@@ -83,6 +111,7 @@ export const parseAIReply = (response: OpenAI.Chat.Completions.ChatCompletion): 
     throw new Error("AI response used an unexpected service tier");
   return {
     text,
+    ...(action ? { action } : {}),
     inputTokens: response.usage.prompt_tokens,
     outputTokens: response.usage.completion_tokens,
     cachedInputTokens,

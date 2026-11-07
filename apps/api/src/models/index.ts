@@ -21,6 +21,11 @@ export const User = mongoose.model("User", userSchema);
 const organizationSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
+    timeZone: { type: String, default: "UTC" },
+    openingHours: {
+      type: [{ day: Number, startMinute: Number, endMinute: Number }],
+      default: [],
+    },
     dailyBudgetMicros: { type: Number, required: true, min: 0 },
     monthlyBudgetMicros: { type: Number, required: true, min: 0 },
     retentionDays: {
@@ -187,6 +192,7 @@ const widgetSessionSchema = new Schema(
     },
     visitorId: { type: String, required: true },
     currentConversationId: { type: Schema.Types.ObjectId, ref: "Conversation" },
+    locale: { type: String, enum: ["en", "tr"], default: "en" },
     origin: { type: String, required: true },
     expiresAt: { type: Date, required: true },
   },
@@ -276,6 +282,7 @@ const widgetRequestSchema = new Schema(
       required: true,
     },
     visitorId: { type: String, required: true },
+    locale: { type: String, enum: ["en", "tr"], default: "en" },
     clientMessageId: { type: String, required: true },
     text: { type: String, required: true },
     status: {
@@ -290,6 +297,7 @@ const widgetRequestSchema = new Schema(
     reservedDay: { type: Date },
     reservedMonth: { type: Date },
     responseMessageId: { type: Schema.Types.ObjectId, ref: "Message" },
+    actionId: { type: Schema.Types.ObjectId, ref: "AgentAction" },
     errorCode: { type: String },
   },
   options,
@@ -300,6 +308,7 @@ widgetRequestSchema.index(
 );
 widgetRequestSchema.index({ status: 1, createdAt: 1 });
 widgetRequestSchema.index({ conversationId: 1, status: 1, createdAt: 1 });
+widgetRequestSchema.index({ organizationId: 1, actionId: 1 }, { partialFilterExpression: { actionId: { $type: "objectId" } } });
 export const WidgetRequest = mongoose.model(
   "WidgetRequest",
   widgetRequestSchema,
@@ -327,3 +336,70 @@ const auditEventSchema = new Schema({
 });
 auditEventSchema.index({ organizationId: 1, createdAt: -1 });
 export const AuditEvent = mongoose.model("AuditEvent", auditEventSchema);
+
+const staffAvailabilitySchema = new Schema({
+  organizationId: { type: Schema.Types.ObjectId, ref: "Organization", required: true },
+  staffId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  windows: { type: [{ day: Number, startMinute: Number, endMinute: Number }], default: [] },
+}, options);
+staffAvailabilitySchema.index({ organizationId: 1, staffId: 1 }, { unique: true });
+export const StaffAvailability = mongoose.model("StaffAvailability", staffAvailabilitySchema);
+
+const customerSchema = new Schema({
+  organizationId: { type: Schema.Types.ObjectId, ref: "Organization", required: true },
+  conversationId: { type: Schema.Types.ObjectId, ref: "Conversation" },
+  visitorId: { type: String },
+  name: { type: String, required: true },
+  contact: { type: String, required: true },
+  request: { type: String, required: true },
+  consent: { recorded: Boolean, source: String, at: Date },
+}, options);
+customerSchema.index({ organizationId: 1, updatedAt: -1 });
+customerSchema.index({ organizationId: 1, conversationId: 1 });
+export const Customer = mongoose.model("Customer", customerSchema);
+
+const appointmentSchema = new Schema({
+  organizationId: { type: Schema.Types.ObjectId, ref: "Organization", required: true },
+  staffId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  customerId: { type: Schema.Types.ObjectId, ref: "Customer" },
+  conversationId: { type: Schema.Types.ObjectId, ref: "Conversation" },
+  visitorId: { type: String },
+  startAt: { type: Date, required: true },
+  endAt: { type: Date, required: true },
+  status: { type: String, enum: ["booked", "cancelled"], default: "booked" },
+  createdBy: { type: String, enum: ["widget", "staff"], required: true },
+}, options);
+appointmentSchema.index({ organizationId: 1, startAt: 1 });
+appointmentSchema.index({ organizationId: 1, staffId: 1, startAt: 1 });
+appointmentSchema.index({ organizationId: 1, visitorId: 1 });
+export const Appointment = mongoose.model("Appointment", appointmentSchema);
+
+const appointmentSlotSchema = new Schema({
+  organizationId: { type: Schema.Types.ObjectId, ref: "Organization", required: true },
+  staffId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  appointmentId: { type: Schema.Types.ObjectId, ref: "Appointment", required: true },
+  startAt: { type: Date, required: true },
+});
+appointmentSlotSchema.index({ organizationId: 1, staffId: 1, startAt: 1 }, { unique: true });
+appointmentSlotSchema.index({ organizationId: 1, appointmentId: 1 });
+export const AppointmentSlot = mongoose.model("AppointmentSlot", appointmentSlotSchema);
+
+const agentActionSchema = new Schema({
+  organizationId: { type: Schema.Types.ObjectId, ref: "Organization", required: true },
+  assistantId: { type: Schema.Types.ObjectId, ref: "Assistant" },
+  conversationId: { type: Schema.Types.ObjectId, ref: "Conversation" },
+  visitorId: { type: String },
+  locale: { type: String, enum: ["en", "tr"], default: "en" },
+  actorId: { type: Schema.Types.ObjectId, ref: "User" },
+  name: { type: String, required: true },
+  arguments: { type: Schema.Types.Mixed, required: true },
+  result: { type: Schema.Types.Mixed },
+  status: { type: String, enum: ["pending", "completed", "failed"], required: true },
+  idempotencyKey: { type: String, required: true },
+  expiresAt: { type: Date },
+  confirmedAt: { type: Date },
+}, options);
+agentActionSchema.index({ organizationId: 1, idempotencyKey: 1 }, { unique: true });
+agentActionSchema.index({ organizationId: 1, createdAt: -1 });
+agentActionSchema.index({ organizationId: 1, conversationId: 1, status: 1 });
+export const AgentAction = mongoose.model("AgentAction", agentActionSchema);

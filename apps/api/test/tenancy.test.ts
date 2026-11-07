@@ -31,7 +31,7 @@ setMailSenderForTests(async ({ to, token }) => {
 });
 const { distributedLimit } = await import("../src/middleware/limits.js");
 const { maximumReservationMicros } = await import("../src/services/budget.js");
-const { processPendingRequests } =
+const { processPendingRequests, buildReceptionistInstructions } =
   await import("../src/services/widget-queue.js");
 const { runRetention } = await import("../src/services/retention.js");
 const {
@@ -45,6 +45,8 @@ const {
   RateCounter,
   AccountToken,
   Session,
+  Membership,
+  User,
 } = await import("../src/models/index.js");
 const app = createApp(async () => ({
   text: "Test answer",
@@ -416,7 +418,12 @@ test("daily and monthly budgets reject concurrent AI requests across visitors", 
     });
   assert.equal(assistant.status, 201);
   const text = "Budget guarded request";
-  const reserve = maximumReservationMicros(instructions, [
+  const org = await Organization.findById(orgB).lean();
+  const staffMembers = await Membership.find({ organizationId: orgB, role: { $in: ["owner", "admin", "agent"] } }).lean();
+  const staffUsers = await User.find({ _id: { $in: staffMembers.map((member) => member.userId) } }).select("name").lean();
+  const fullInstructions = buildReceptionistInstructions(instructions, org?.timeZone ?? "UTC",
+    staffUsers.map((user) => ({ name: user.name, id: user._id.toString() })));
+  const reserve = maximumReservationMicros(fullInstructions, [
     { role: "customer", text },
   ]);
   const dollars = (reserve / 1_000_000).toFixed(6);

@@ -1,13 +1,16 @@
 import { Router } from "express";
-import { isValidObjectId } from "mongoose";
+import mongoose, { isValidObjectId } from "mongoose";
 import { z } from "zod";
 import {
+  AgentAction,
   Assistant,
   Conversation,
   Message,
   WidgetRequest,
   WidgetSession,
 } from "../models/index.js";
+import { ActionError, actionReply, confirmAction } from "../services/agent-actions.js";
+import { AppointmentError } from "../services/appointments.js";
 import { validate } from "../middleware/validate.js";
 import { requireWidgetSession } from "../middleware/security.js";
 import { widgetLimit } from "../middleware/limits.js";
@@ -26,7 +29,7 @@ export const widgetRoutes = (respond: AIResponder) => {
   router.post(
     "/sessions",
     validate(
-      z.strictObject({ publicKey: z.string().startsWith("ost_").max(64) }),
+      z.strictObject({ publicKey: z.string().startsWith("ost_").max(64), locale: z.enum(["en", "tr"]).optional() }),
     ),
     async (req, res) => {
       const origin = req.get("origin");
@@ -51,6 +54,7 @@ export const widgetRoutes = (respond: AIResponder) => {
         organizationId: assistant.organizationId,
         assistantId: assistant._id,
         visitorId,
+        locale: req.body.locale ?? "en",
         origin,
         expiresAt,
       });
@@ -106,7 +110,7 @@ export const widgetRoutes = (respond: AIResponder) => {
     },
   );
   const responseFor = async (request: typeof WidgetRequest.prototype) => {
-    const [message, reply] = await Promise.all([
+    const [message, reply, action] = await Promise.all([
       Message.findOne({ requestId: request._id, role: "customer" }).lean(),
       request.responseMessageId
         ? Message.findOne({
@@ -114,6 +118,9 @@ export const widgetRoutes = (respond: AIResponder) => {
             organizationId: request.organizationId,
           }).lean()
         : Promise.resolve(null),
+      request.actionId ? AgentAction.findOne({ _id: request.actionId,
+        organizationId: request.organizationId, visitorId: request.visitorId,
+      }).select("name status result expiresAt").lean() : Promise.resolve(null),
     ]);
     return {
       requestId: request._id,
@@ -122,8 +129,52 @@ export const widgetRoutes = (respond: AIResponder) => {
       message,
       reply,
       errorCode: request.errorCode,
+      action: action ? { id: action._id, name: action.name, status: action.status, result: action.result, expiresAt: action.expiresAt } : null,
     };
   };
+  router.get("/actions/pending", requireWidgetSession, async (_req, res) => {
+    const session = res.locals.widgetSession;
+    const actions = await AgentAction.find({ organizationId: session.organizationId,
+      assistantId: session.assistantId, visitorId: session.visitorId,
+      status: "pending", expiresAt: { $gt: new Date() },
+    }).select("name arguments expiresAt").sort({ createdAt: -1 }).limit(5).lean();
+    const settled = await WidgetRequest.find({ organizationId: session.organizationId,
+      assistantId: session.assistantId, visitorId: session.visitorId,
+      status: "completed", actionId: { $in: actions.map((action) => action._id) },
+    }).select("actionId").lean();
+    const visible = new Set(settled.map((request) => request.actionId?.toString()));
+    res.json({ actions: actions.filter((action) => visible.has(action._id.toString())).map((action) => ({ id: action._id,
+      name: action.name, arguments: action.arguments, expiresAt: action.expiresAt,
+    })) });
+  });
+  router.post("/actions/:actionId/confirm", requireWidgetSession, async (req, res) => {
+    const actionId = req.params.actionId;
+    if (typeof actionId !== "string" || !isValidObjectId(actionId)) { res.status(400).json({ error: "Invalid action" }); return; }
+    const widget = res.locals.widgetSession;
+    try {
+      const action = await confirmAction({ organizationId: widget.organizationId,
+        assistantId: widget.assistantId, visitorId: widget.visitorId,
+        conversationId: widget.currentConversationId,
+      }, new mongoose.Types.ObjectId(actionId));
+      res.json({ action: { id: action._id, name: action.name, status: action.status,
+        result: action.result }, message: actionReply(action) });
+    } catch (error) {
+      if (error instanceof AppointmentError || error instanceof ActionError) {
+        res.status(error.code === "slot_taken" ? 409 : 403).json({ error: error.code }); return;
+      }
+      throw error;
+    }
+  });
+  router.post("/actions/:actionId/decline", requireWidgetSession, async (req, res) => {
+    const actionId = req.params.actionId;
+    if (typeof actionId !== "string" || !isValidObjectId(actionId)) { res.status(400).json({ error: "Invalid action" }); return; }
+    const widget = res.locals.widgetSession;
+    const action = await AgentAction.findOneAndUpdate({ _id: actionId, organizationId: widget.organizationId,
+      assistantId: widget.assistantId, visitorId: widget.visitorId, status: "pending",
+    }, { $set: { status: "failed", result: { declined: true } } }, { returnDocument: "after" });
+    if (!action) { res.status(404).json({ error: "Action unavailable" }); return; }
+    res.json({ ok: true });
+  });
   router.get("/requests/:requestId", requireWidgetSession, async (req, res) => {
     if (!isValidObjectId(req.params.requestId)) {
       res.status(400).json({ error: "Invalid request" });

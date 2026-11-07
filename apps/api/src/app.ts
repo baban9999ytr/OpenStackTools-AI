@@ -18,6 +18,7 @@ import { env } from "./config/env.js";
 import { logger, safeError } from "./config/logger.js";
 import { auditStaffMutation } from "./middleware/audit.js";
 import operationsRoutes from "./routes/operations.js";
+import receptionistRoutes from "./routes/receptionist.js";
 
 export const createApp = (respond: AIResponder = openAIResponder) => {
   const app = express();
@@ -84,6 +85,7 @@ export const createApp = (respond: AIResponder = openAIResponder) => {
     auditStaffMutation,
     organizationRoutes,
     operationsRoutes,
+    receptionistRoutes,
     assistantRoutes,
     conversationRoutes,
   );

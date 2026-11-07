@@ -62,6 +62,8 @@ if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(env.openaiModel))
   throw new Error("Invalid OPENAI_MODEL identifier");
 if (env.reasoningEffort && !["none", "low", "medium", "high", "xhigh", "max"].includes(env.reasoningEffort))
   throw new Error("Invalid OPENAI_REASONING_EFFORT");
+if (env.openaiModel === "gpt-6-luna" && env.reasoningEffort !== "none")
+  throw new Error("GPT-6 Luna tool calling requires OPENAI_REASONING_EFFORT=none");
 
 if (env.defaultMonthlyBudgetMicros < env.defaultDailyBudgetMicros)
   throw new Error("Monthly budget must be at least the daily budget");

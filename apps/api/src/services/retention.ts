@@ -1,6 +1,10 @@
 import mongoose from "mongoose";
 import {
+  AgentAction,
+  Appointment,
+  AppointmentSlot,
   Conversation,
+  Customer,
   Message,
   Organization,
   WidgetRequest,
@@ -55,6 +59,17 @@ export const runRetention = async (now = new Date()) => {
       } finally {
         await session.endSession();
       }
+    }
+    await AgentAction.deleteMany({ organizationId: organization._id, createdAt: { $lt: cutoff } });
+    await Customer.deleteMany({ organizationId: organization._id, updatedAt: { $lt: cutoff } });
+    const oldAppointments = await Appointment.find({ organizationId: organization._id, endAt: { $lt: cutoff } }).select("_id").lean();
+    if (oldAppointments.length) {
+      const ids = oldAppointments.map((item) => item._id);
+      const session = await mongoose.startSession();
+      try { await session.withTransaction(async () => {
+        await AppointmentSlot.deleteMany({ organizationId: organization._id, appointmentId: { $in: ids } }, { session });
+        await Appointment.deleteMany({ organizationId: organization._id, _id: { $in: ids } }, { session });
+      }); } finally { await session.endSession(); }
     }
   }
 };

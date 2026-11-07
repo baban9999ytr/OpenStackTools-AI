@@ -19,6 +19,7 @@ process.env.SMTP_FROM = "Test <no-reply@example.invalid>";
 
 const { parseAIReply, providerFailurePolicy } = await import("../src/services/ai.js");
 const { measuredCostMicros, maximumReservationMicros } = await import("../src/services/budget.js");
+const { parseAction, actionReply } = await import("../src/services/agent-actions.js");
 
 const response = (usage: Record<string, unknown>) => ({
   choices: [{ message: { content: "Synthetic response" } }],
@@ -59,4 +60,29 @@ test("unavailable model fails clearly without automatic replay", () => {
   assert.deepEqual(providerFailurePolicy({ status: 404 }), {
     code: "provider_model_unavailable", retry: false, uncertain: false,
   });
+});
+
+test("a single provider function call is parsed as data, never executed by the adapter", () => {
+  const fixture = response({ prompt_tokens: 20, completion_tokens: 10 });
+  const completion = { ...fixture, choices: [{ message: { content: null,
+    tool_calls: [{ id: "call-1", type: "function", function: { name: "check_availability",
+      arguments: JSON.stringify({ staffId: "507f1f77bcf86cd799439011", date: "2027-02-01", durationMinutes: 30 }),
+    } }],
+  } }] } as unknown as OpenAI.Chat.Completions.ChatCompletion;
+  const reply = parseAIReply(completion);
+  assert.equal(reply.action?.name, "check_availability");
+  assert.equal(reply.text, "");
+  assert.equal(reply.inputTokens, 20);
+});
+
+test("action registry rejects unknown names, extra fields and unsupported durations", () => {
+  assert.throws(() => parseAction("run_code", { command: "echo unsafe" }), /invalid_action/);
+  assert.throws(() => parseAction("create_appointment", { staffId: "507f1f77bcf86cd799439011", startAt: "2027-02-01T09:00:00Z", durationMinutes: 7 }), /invalid_arguments/);
+  assert.throws(() => parseAction("cancel_appointment", { appointmentId: "507f1f77bcf86cd799439011", extra: true }), /invalid_arguments/);
+});
+
+test("confirmed action replies follow the widget session language", () => {
+  assert.match(actionReply({ name: "create_appointment", status: "pending", locale: "tr" }), /Henüz randevu oluşturulmadı/);
+  assert.match(actionReply({ name: "create_appointment", status: "completed", locale: "tr", result: { appointmentId: "123" } }), /Randevu onaylandı/);
+  assert.match(actionReply({ name: "create_appointment", status: "pending", locale: "en" }), /No booking has been made/);
 });

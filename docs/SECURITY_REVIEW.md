@@ -12,6 +12,7 @@
 - Provider calls use a 30-second timeout with SDK retries disabled. Only a provider 429 is retried once by the queue; ambiguous timeouts and expired reserved leases are charged conservatively and not replayed automatically. Provider failure logs contain a controlled failure code and request ID, without raw provider error text or customer messages.
 - API responses under `/api` use `Cache-Control: no-store`; `X-Request-ID` correlates structured request logs. Query strings and request bodies are omitted from routine logs, and unexpected errors are summarized without their messages. `/health/ready` returns 503 when MongoDB is disconnected.
 - Production configuration rejects a non-HTTPS dashboard origin and enables Secure host-only cookies and required SMTP TLS. The staging example keeps API and MongoDB private and blocks public readiness checks; it has not been deployed.
+- A separate local HTTPS Compose exercise uses a user-trusted test CA, loopback-only TLS edge, authenticated MongoDB replica set, and STARTTLS Mailpit restricted to synthetic recipients. The test CA, leaf keys, session secret, and database credentials are ignored by Git and excluded from Docker build contexts. Its public edge blocks `/health/ready`; this is local verification only.
 
 ## Remaining pilot and production risks
 

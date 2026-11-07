@@ -2,6 +2,8 @@
 
 No production deployment is included. Local Compose runs MongoDB 8 as a single-node replica set, Mailpit for test email, API, and web. Run `docker compose up --build` after setting `apps/api/.env`; Mailpit is at `http://localhost:8025`. Never use Mailpit as a production mail server.
 
+For a separate production-image exercise over locally trusted HTTPS, use [`LOCAL_HTTPS_STAGING_RUNBOOK.md`](../LOCAL_HTTPS_STAGING_RUNBOOK.md). Its Compose stack binds only loopback ports, uses an authenticated MongoDB replica set and STARTTLS Mailpit, and leaves the ordinary development Compose file unchanged. The local certificate and test credentials are generated into ignored files. Local HTTPS does not establish public TLS readiness. Live OpenAI and external SMTP checks remain explicitly gated by [`LIVE_PROVIDER_VERIFICATION.md`](../LIVE_PROVIDER_VERIFICATION.md).
+
 For an approved staging environment, review [`STAGING_RUNBOOK.md`](../STAGING_RUNBOOK.md), [`BACKUP_RESTORE_RUNBOOK.md`](../BACKUP_RESTORE_RUNBOOK.md), `deploy/compose.staging.example.yaml`, and `deploy/staging.api.env.example`. Those files are examples only; no staging service is running. The staging Compose example expects a private authenticated MongoDB replica set and a sandbox SMTP provider, and publishes only its HTTPS edge.
 
 ## Ecosystem routing and brand boundary

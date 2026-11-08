@@ -10,8 +10,10 @@ import {
   Assistant,
   AuditEvent,
   BudgetWindow,
+  BusinessKnowledge,
   Conversation,
   Customer,
+  Listing,
   Membership,
   Message,
   Organization,
@@ -42,6 +44,8 @@ const scoped = {
   customers: Customer,
   agentActions: AgentAction,
   staffAvailability: StaffAvailability,
+  knowledge: BusinessKnowledge,
+  listings: Listing,
 };
 router.get(
   "/:organizationId/export/:kind",
@@ -171,6 +175,8 @@ router.delete(
           AccountToken,
           Membership,
           StaffAvailability,
+          BusinessKnowledge,
+          Listing,
         ])
           await mongoose.connection
             .collection(model.collection.name)

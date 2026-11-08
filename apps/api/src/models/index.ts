@@ -123,6 +123,7 @@ const messageSchema = new Schema(
       required: true,
     },
     text: { type: String, required: true },
+    source: { type: String, enum: ["retrieval"] },
     clientMessageId: { type: String },
     requestId: { type: Schema.Types.ObjectId, ref: "WidgetRequest" },
   },
@@ -353,10 +354,49 @@ const customerSchema = new Schema({
   contact: { type: String, required: true },
   request: { type: String, required: true },
   consent: { recorded: Boolean, source: String, at: Date },
+  requirements: { type: String, default: "" },
+  budgetMin: { type: Number, min: 0 }, budgetMax: { type: Number, min: 0 },
+  preferredLocations: { type: [String], default: [] },
+  propertyTypes: { type: [String], default: [] },
+  minRooms: { type: Number, min: 0 }, minAreaSqm: { type: Number, min: 0 },
+  leadStatus: { type: String, enum: ["new", "qualified", "contacted", "won", "lost"], default: "new" },
+  assignedTo: { type: Schema.Types.ObjectId, ref: "User" },
+  notes: { type: String, default: "" },
+  followUpAt: { type: Date },
+  identityKey: { type: String },
 }, options);
 customerSchema.index({ organizationId: 1, updatedAt: -1 });
 customerSchema.index({ organizationId: 1, conversationId: 1 });
+customerSchema.index({ organizationId: 1, leadStatus: 1, followUpAt: 1 });
+customerSchema.index({ organizationId: 1, identityKey: 1 }, { unique: true,
+  partialFilterExpression: { identityKey: { $type: "string" } },
+});
 export const Customer = mongoose.model("Customer", customerSchema);
+
+const businessKnowledgeSchema = new Schema({
+  organizationId: { type: Schema.Types.ObjectId, ref: "Organization", required: true, unique: true },
+  profile: { type: String, default: "" },
+  services: { type: [{ name: String, description: String, price: String }], default: [] },
+  faqs: { type: [{ question: String, answer: String }], default: [] },
+  policies: { type: [{ title: String, text: String }], default: [] },
+  contact: { email: String, phone: String, address: String, website: String },
+  facts: { type: [{ label: String, value: String }], default: [] },
+}, options);
+export const BusinessKnowledge = mongoose.model("BusinessKnowledge", businessKnowledgeSchema);
+
+const listingSchema = new Schema({
+  organizationId: { type: Schema.Types.ObjectId, ref: "Organization", required: true },
+  title: { type: String, required: true }, description: { type: String, required: true },
+  location: { type: String, required: true }, price: { type: Number, required: true, min: 0 },
+  currency: { type: String, enum: ["TRY", "USD", "EUR", "GBP"], required: true },
+  propertyType: { type: String, enum: ["apartment", "house", "land", "commercial"], required: true },
+  rooms: { type: Number, min: 0, max: 50 }, areaSqm: { type: Number, required: true, min: 1 },
+  availability: { type: String, enum: ["available", "reserved", "sold"], default: "available" },
+  publicUrl: { type: String }, archivedAt: { type: Date },
+}, options);
+listingSchema.index({ organizationId: 1, archivedAt: 1, availability: 1, price: 1 });
+listingSchema.index({ organizationId: 1, updatedAt: -1 });
+export const Listing = mongoose.model("Listing", listingSchema);
 
 const appointmentSchema = new Schema({
   organizationId: { type: Schema.Types.ObjectId, ref: "Organization", required: true },

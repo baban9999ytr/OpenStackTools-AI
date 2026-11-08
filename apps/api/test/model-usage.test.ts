@@ -79,6 +79,8 @@ test("action registry rejects unknown names, extra fields and unsupported durati
   assert.throws(() => parseAction("run_code", { command: "echo unsafe" }), /invalid_action/);
   assert.throws(() => parseAction("create_appointment", { staffId: "507f1f77bcf86cd799439011", startAt: "2027-02-01T09:00:00Z", durationMinutes: 7 }), /invalid_arguments/);
   assert.throws(() => parseAction("cancel_appointment", { appointmentId: "507f1f77bcf86cd799439011", extra: true }), /invalid_arguments/);
+  assert.throws(() => parseAction("search_listings", { budgetMax: 100000 }), /invalid_arguments/);
+  assert.throws(() => parseAction("search_listings", { $where: "return true" }), /invalid_arguments/);
 });
 
 test("confirmed action replies follow the widget session language", () => {

@@ -5,6 +5,7 @@ import {
   AppointmentSlot,
   Conversation,
   Customer,
+  Listing,
   Message,
   Organization,
   WidgetRequest,
@@ -62,6 +63,7 @@ export const runRetention = async (now = new Date()) => {
     }
     await AgentAction.deleteMany({ organizationId: organization._id, createdAt: { $lt: cutoff } });
     await Customer.deleteMany({ organizationId: organization._id, updatedAt: { $lt: cutoff } });
+    await Listing.deleteMany({ organizationId: organization._id, archivedAt: { $lt: cutoff } });
     const oldAppointments = await Appointment.find({ organizationId: organization._id, endAt: { $lt: cutoff } }).select("_id").lean();
     if (oldAppointments.length) {
       const ids = oldAppointments.map((item) => item._id);

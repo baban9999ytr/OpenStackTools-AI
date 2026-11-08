@@ -12,7 +12,10 @@
     "migrate:budgets": "tsx src/scripts/migrate-pilot-budgets.ts",
     "test:openai:live": "tsx test/live-openai.ts",
     "test:smtp:live": "tsx test/live-smtp.ts",
-    "test:backup:restore": "tsx test/backup-restore.ts"
+    "test:backup:restore": "tsx test/backup-restore.ts",
+    "eval:deterministic": "tsx evals/deterministic.ts",
+    "eval:live": "tsx evals/live.ts",
+    "eval:typecheck": "tsc -p evals/tsconfig.json"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

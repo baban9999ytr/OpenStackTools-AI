@@ -1,0 +1,10 @@
+{
+  "model": "replace-with-configured-model-id",
+  "serviceTier": "default",
+  "verifiedAt": "YYYY-MM-DD",
+  "source": "https://provider.example/pricing",
+  "inputUsdPerMillion": 0,
+  "cachedInputUsdPerMillion": 0,
+  "cacheWriteUsdPerMillion": 0,
+  "outputUsdPerMillion": 0
+}

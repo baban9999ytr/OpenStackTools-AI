@@ -10,3 +10,4 @@ playwright-report/
 apps/web/public/embed.js
 deploy/local-https/.secrets/
 __pycache__/
+apps/api/evals/prices.local.json

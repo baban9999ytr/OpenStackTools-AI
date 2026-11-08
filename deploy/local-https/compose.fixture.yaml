@@ -1,0 +1,6 @@
+# Compose only with compose.yaml for synthetic Phase 7 integration.
+services:
+  api:
+    command: ["node", "--import", "tsx", "apps/api/test/phase7-fixture-server.ts"]
+    environment:
+      PHASE7_SYNTHETIC_FIXTURE: "1"

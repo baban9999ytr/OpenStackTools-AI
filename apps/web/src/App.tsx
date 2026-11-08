@@ -9,6 +9,7 @@ import {
 import { usePreferences } from "./preferences";
 import { Wordmark } from "./Wordmark";
 import { Receptionist } from "./Receptionist";
+import { Business } from "./Business";
 
 type Account = { id: string; name: string; email: string };
 type Me = { user: Account; organizations: Organization[] };
@@ -234,7 +235,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
     (item) => item.id === organizationId,
   );
   const [tab, setTab] = useState<
-    "assistants" | "inbox" | "receptionist" | "team" | "usage" | "sessions"
+    "assistants" | "inbox" | "receptionist" | "business" | "team" | "usage" | "sessions"
   >("assistants");
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [editingAssistantId, setEditingAssistantId] = useState("");
@@ -474,7 +475,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
           aria-label="Product navigation"
           className={navOpen ? "nav-open" : ""}
         >
-          {(["assistants", "inbox", "receptionist", "team", "usage", "sessions"] as const)
+          {(["assistants", "inbox", "receptionist", "business", "team", "usage", "sessions"] as const)
             .filter((item) =>
               item === "team" || item === "usage" ? canManage : true,
             )
@@ -665,6 +666,9 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
         )}
         {tab === "receptionist" && organization && (
           <Receptionist organizationId={organizationId} role={organization.role} />
+        )}
+        {tab === "business" && organization && (
+          <Business organizationId={organizationId} role={organization.role} />
         )}
         {tab === "inbox" && (
           <div className="inbox-layout">

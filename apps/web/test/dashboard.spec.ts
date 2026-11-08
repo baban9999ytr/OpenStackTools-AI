@@ -94,3 +94,30 @@ test("receptionist dashboard works on mobile in Turkish and dark theme", async (
   const a11y = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(a11y.violations).toEqual([]);
 });
+
+test("business knowledge and listings work on mobile in Turkish and dark theme", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockDashboard(page);
+  let saved = false;
+  await page.route("**/api/organizations/org1/knowledge", route => {
+    if (route.request().method() === "PUT") { saved = true; return route.fulfill({ json: { knowledge: route.request().postDataJSON() } }); }
+    return route.fulfill({ json: { knowledge: null } });
+  });
+  await page.route("**/api/organizations/org1/listings**", route => route.fulfill({ json: { listings: [] } }));
+  await page.route("**/api/organizations/org1/conversation-summaries", route => route.fulfill({ json: { summaries: [] } }));
+  await page.route("**/api/organizations/org1/receptionist/customers", route => route.fulfill({ json: { customers: [] } }));
+  await page.route("**/api/organizations/org1/receptionist/config", route => route.fulfill({ json: { staff: [] } }));
+  await page.route("**/api/organizations/org1/leads/follow-up", route => route.fulfill({ json: { customers: [] } }));
+  await page.goto("http://127.0.0.1:5173/app");
+  await page.getByRole("button", { name: "Theme" }).click();
+  await page.getByRole("button", { name: "Language" }).click();
+  await page.getByRole("button", { name: "Menü" }).click();
+  await page.getByRole("button", { name: "İşletme" }).click();
+  await expect(page.getByRole("heading", { name: "İşletme bilgileri" })).toBeVisible();
+  await page.getByRole("textbox", { name: "İşletme profili" }).fill("Sentetik emlak ofisi");
+  await page.getByRole("button", { name: "Bilgileri kaydet" }).click();
+  await expect.poll(() => saved).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const a11y = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  expect(a11y.violations).toEqual([]);
+});

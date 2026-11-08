@@ -85,10 +85,18 @@ button:not(.text-button):not(.secondary):not(.nav-active):not(.mobile-menu):hove
 .checkbox-label { display: flex; align-items: center; gap: .6rem; }
 .checkbox-label input { width: auto; }
 .receptionist-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; align-items: start; }
+.business-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; align-items: start; }
+.business-grid > .error, .business-grid > .notice { grid-column: 1 / -1; margin: 0; }
+.business-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; }
+.business-rows { border: 1px solid var(--ost-border); border-radius: var(--ost-radius-md); margin: 1rem 0; padding: .8rem; }
+.business-row { border-top: 1px solid var(--ost-border); padding: .8rem 0; }
+.business-row:first-of-type { border-top: 0; }
+.business-grid textarea { min-height: 5rem; }
 .receptionist-grid > .error, .receptionist-grid > .notice { grid-column: 1 / -1; margin: 0; }
 .schedule-row { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(90px, .7fr) minmax(90px, .7fr) auto; gap: .45rem; margin-bottom: .6rem; align-items: center; }
 .schedule-row input, .schedule-row select { min-width: 0; }
-@media (max-width: 1100px) { .receptionist-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .receptionist-grid, .business-grid { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .business-pair { grid-template-columns: 1fr; } }
 @media (max-width: 520px) { .schedule-row { grid-template-columns: 1fr 1fr; } .schedule-row select, .schedule-row button { grid-column: 1 / -1; } }
 @media (max-width: 1000px) { .grid-two, .inbox-layout { grid-template-columns: 1fr; } .sidebar { width: 210px; flex-basis: 210px; } }
 @media (max-width: 700px) { .auth-layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } .brand-panel { min-height: auto; gap: 1rem; padding: 1.4rem; } .brand-panel h1 { font-size: clamp(2rem, 7vw, 2.5rem); } .brand-intro { margin: 1rem 0 0; } .brand-back { display: none; } .auth-panel { padding: 1rem; } .app-shell { display: block; } .sidebar { width: 100%; padding: 1rem; gap: 1rem; border-right: 0; border-bottom: 1px solid var(--ost-border); } .mobile-menu { display: inline-flex; } .sidebar nav { display: none; } .sidebar nav.nav-open { display: grid; } .sidebar-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; margin-top: 0; } .workspace { padding: 1.2rem 1rem 3rem; } .workspace-header { align-items: flex-start; } }

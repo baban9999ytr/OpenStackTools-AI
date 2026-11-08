@@ -25,4 +25,4 @@ assert.equal(leak.factuality, false);
 
 const summary = await runEvaluation();
 console.log(JSON.stringify(summary, null, 2));
-if (summary.model.passed !== summary.total || summary.backend.passed !== summary.total || summary.backend.failed) process.exitCode = 1;
+if (summary.model.passed !== summary.total || summary.backend.passed !== 64 || summary.backend.skipped !== 4 || summary.backend.failed) process.exitCode = 1;

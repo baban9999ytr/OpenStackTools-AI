@@ -19,7 +19,7 @@ The production OpenAI adapter now exposes a small factory taking model ID, reaso
 
 | Check | Result | Limit |
 | --- | --- | --- |
-| `npm run eval:deterministic -w apps/api` | PASS: 68/68 backend assertions; 68/68 deterministic fixture rubric checks; 17 categories × 4, EN 34/TR 34. Four expected synthetic provider errors were classified. | Fixture output was authored to match expected tools. The model score is **not** real-model accuracy. |
+| `npm run eval:deterministic -w apps/api` | PASS: 64/64 applicable backend checks (60 action/retrieval, four provider-failure policy); four ambiguous no-action cases skipped. 68/68 deterministic fixture rubric checks; 17 categories × 4, EN 34/TR 34. | Fixture output was authored to match expected tools. The model score is **not** real-model accuracy. |
 | Rubric negative controls | PASS: unknown tool, invalid budget filter, reserved availability, fabricated monetary claim, premature booking claim and tenant marker failed scoring. | Heuristic text checks can miss paraphrases and unsupported nonnumeric claims. |
 | `npm run eval:typecheck -w apps/api` | PASS | Evaluation TypeScript only. |
 | `npm test` | PASS: 31 MongoDB-backed API tests | Deterministic responder, no OpenAI. |

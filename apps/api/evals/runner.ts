@@ -18,7 +18,7 @@ for (const [key, value] of Object.entries(defaults)) process.env[key] ??= value;
 export type EvalSummary = {
   total: number; categories: Record<string, number>; locales: Record<string, number>;
   model: { passed: number; toolSelection: number; validArguments: number; expectedArguments: number; factuality: number; providerErrors: number };
-  backend: { passed: number; failed: number; failures: string[] };
+  backend: { passed: number; skipped: number; failed: number; failures: string[] };
 };
 type RunOptions = { responder?: AIResponder; modelOnly?: boolean; maxScenarios?: number; ids?: string[] };
 const valueOf = (raw: unknown, bindings: Record<string, string>): unknown => {
@@ -39,7 +39,7 @@ export const runEvaluation = async (options: RunOptions = {}): Promise<EvalSumma
     .slice(0, options.maxScenarios ?? scenarios.length);
   const summary: EvalSummary = { total: 0, categories: {}, locales: {},
     model: { passed: 0, toolSelection: 0, validArguments: 0, expectedArguments: 0, factuality: 0, providerErrors: 0 },
-    backend: { passed: 0, failed: 0, failures: [] } };
+    backend: { passed: 0, skipped: 0, failed: 0, failures: [] } };
   let replset: MongoMemoryReplSet | undefined;
   let bindings: Record<string, string> = {};
   const { Organization, User, Membership, Assistant, Conversation, BusinessKnowledge, Listing, StaffAvailability, Appointment, Customer } = await import("../src/models/index.js");
@@ -108,8 +108,11 @@ export const runEvaluation = async (options: RunOptions = {}): Promise<EvalSumma
           if (scenario.category === "provider_failure") {
             const failure = providerFailurePolicy(new Error("synthetic timeout"));
             assert.deepEqual(failure, { code: "provider_unavailable", retry: false, uncertain: true });
+            summary.backend.passed++;
+          } else {
+            summary.backend.skipped++;
           }
-          summary.backend.passed++; continue;
+          continue;
         }
         const name = scenario.expectedTool ?? "cancel_appointment";
         if (scenario.backend === "denied") {

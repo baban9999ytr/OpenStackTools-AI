@@ -16,14 +16,6 @@ export type AIResponder = (
   instructions: string,
   history: Turn[],
 ) => Promise<AIReply>;
-const client = new OpenAI({
-  apiKey: env.openaiApiKey,
-  baseURL: "https://api.openai.com/v1",
-  timeout: 30000,
-  // A timeout may happen after the provider has billed a request. The queue
-  // decides whether a new attempt is safe; the SDK must not replay it.
-  maxRetries: 0,
-});
 const objectId = { type: "string", description: "Backend identifier supplied by the business or a prior result" };
 const date = { type: "string", description: "Business-local date, YYYY-MM-DD" };
 const startAt = { type: "string", description: "Exact UTC or offset ISO timestamp from check_availability" };
@@ -59,9 +51,17 @@ export const providerFailurePolicy = (error: unknown) => {
     return { code: "provider_rejected", retry: false, uncertain: false };
   return { code: "provider_unavailable", retry: false, uncertain: true };
 };
-export const openAIResponder: AIResponder = async (instructions, history) => {
+export const createOpenAIResponder = (options: { model: string; reasoningEffort?: string; maxCompletionTokens: number; apiKey: string }): AIResponder => {
+  const client = new OpenAI({
+    apiKey: options.apiKey,
+    baseURL: "https://api.openai.com/v1",
+    timeout: 30000,
+    // A timeout may happen after billing; never let the SDK replay it.
+    maxRetries: 0,
+  });
+  return async (instructions, history) => {
   const response = await client.chat.completions.create({
-    model: env.openaiModel,
+    model: options.model,
     messages: [
       { role: "system", content: instructions },
       ...history.map((turn) => ({
@@ -72,14 +72,17 @@ export const openAIResponder: AIResponder = async (instructions, history) => {
         content: turn.text,
       })),
     ],
-    max_completion_tokens: MAX_COMPLETION_TOKENS,
+    max_completion_tokens: options.maxCompletionTokens,
     tools: receptionistTools,
     parallel_tool_calls: false,
     service_tier: "default",
-    ...(env.reasoningEffort ? { reasoning_effort: env.reasoningEffort as "none" | "low" | "medium" | "high" | "xhigh" | "max" } : {}),
+    ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort as "none" | "low" | "medium" | "high" | "xhigh" | "max" } : {}),
   });
   return parseAIReply(response);
+  };
 };
+export const openAIResponder = createOpenAIResponder({ model: env.openaiModel, reasoningEffort: env.reasoningEffort,
+  maxCompletionTokens: MAX_COMPLETION_TOKENS, apiKey: env.openaiApiKey });
 export const parseAIReply = (response: OpenAI.Chat.Completions.ChatCompletion): AIReply => {
   const message = response.choices[0]?.message;
   const toolCalls = message?.tool_calls ?? [];

@@ -1,0 +1,28 @@
+import assert from "node:assert/strict";
+import { scenarios } from "./scenarios.js";
+import { runEvaluation } from "./runner.js";
+import { scoreReply } from "./scoring.js";
+
+assert.equal(scenarios.length, 68);
+assert.equal(new Set(scenarios.map((scenario) => scenario.id)).size, scenarios.length);
+assert.equal(scenarios.filter((scenario) => scenario.locale === "en").length, 34);
+assert.equal(scenarios.filter((scenario) => scenario.locale === "tr").length, 34);
+const sample = scenarios.find((scenario) => scenario.id === "invented_facts-1");
+assert.ok(sample);
+const badClaim = scoreReply(sample, { text: "A flat costs 1 USD", inputTokens: 5, outputTokens: 5 }, sample.arguments);
+assert.equal(badClaim.passed, false);
+assert.equal(badClaim.factuality, false);
+const badTool = scoreReply(sample, { text: "", action: { name: "run_arbitrary_code", arguments: {} }, inputTokens: 5, outputTokens: 5 }, sample.arguments);
+assert.equal(badTool.validArguments, false);
+const badArgs = scoreReply(sample, { text: "", action: { name: "search_listings", arguments: { budgetMax: 1 } }, inputTokens: 5, outputTokens: 5 }, sample.arguments);
+assert.equal(badArgs.validArguments, false);
+const reservedSearch = scoreReply(sample, { text: "", action: { name: "search_listings", arguments: { availability: "reserved" } }, inputTokens: 5, outputTokens: 5 }, sample.arguments);
+assert.equal(reservedSearch.validArguments, false);
+const falseBooking = scoreReply(sample, { text: "I have booked your appointment", inputTokens: 5, outputTokens: 5 }, sample.arguments);
+assert.equal(falseBooking.factuality, false);
+const leak = scoreReply(sample, { text: "CROSS_TENANT_RECORD", inputTokens: 5, outputTokens: 5 }, sample.arguments);
+assert.equal(leak.factuality, false);
+
+const summary = await runEvaluation();
+console.log(JSON.stringify(summary, null, 2));
+if (summary.model.passed !== summary.total || summary.backend.passed !== summary.total || summary.backend.failed) process.exitCode = 1;

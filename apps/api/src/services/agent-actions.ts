@@ -166,12 +166,21 @@ export const confirmAction = async (context: ActionContext, actionId: mongoose.T
         const existingCustomer = action.visitorId && action.conversationId ? await Customer.findOne({ organizationId: context.organizationId,
           conversationId: action.conversationId, visitorId: action.visitorId }).session(session) : null;
         if (existingCustomer && (existingCustomer.contact !== args.contact || existingCustomer.name !== args.name)) throw new ActionError("action_conflict");
-        const customer = existingCustomer ?? (await Customer.create([{ organizationId: context.organizationId,
-          conversationId: action.conversationId, visitorId: action.visitorId,
-          ...(action.visitorId && action.conversationId ? { identityKey: `${action.conversationId.toString()}:${action.visitorId}` } : {}),
-          name: args.name, contact: args.contact, request: args.request,
-          consent: { recorded: true, source: context.visitorId ? "widget_confirmation" : "staff_confirmation", at: new Date() },
-        }], { session }))[0];
+        let customer = existingCustomer;
+        if (!customer) {
+          try {
+            const [created] = await Customer.create([{ organizationId: context.organizationId,
+              conversationId: action.conversationId, visitorId: action.visitorId,
+              ...(action.visitorId && action.conversationId ? { identityKey: `${action.conversationId.toString()}:${action.visitorId}` } : {}),
+              name: args.name, contact: args.contact, request: args.request,
+              consent: { recorded: true, source: context.visitorId ? "widget_confirmation" : "staff_confirmation", at: new Date() },
+            }], { session });
+            customer = created ?? null;
+          } catch (error) {
+            if ((error as { code?: number }).code === 11000) throw new ActionError("action_conflict");
+            throw error;
+          }
+        }
         if (!customer) throw new ActionError("action_unavailable");
         result = { customerId: customer._id.toString() };
       } else throw new ActionError("action_unavailable");
@@ -187,7 +196,7 @@ export const confirmAction = async (context: ActionContext, actionId: mongoose.T
     });
   } catch (error) {
     if (error instanceof AppointmentError || error instanceof ActionError) throw error;
-    if ((error as { code?: number }).code === 11000) throw new ActionError("action_conflict");
+    if ((error as { code?: number }).code === 11000) throw new AppointmentError("slot_taken");
     throw error;
   } finally { await session.endSession(); }
 };

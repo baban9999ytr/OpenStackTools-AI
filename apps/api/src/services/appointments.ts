@@ -23,7 +23,7 @@ const formatter = (timeZone: string) => new Intl.DateTimeFormat("en-US", {
   hour: "2-digit", minute: "2-digit", hourCycle: "h23",
 });
 const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const localParts = (date: Date, timeZone: string) => {
+export const localParts = (date: Date, timeZone: string) => {
   const parts = Object.fromEntries(formatter(timeZone).formatToParts(date).map((part) => [part.type, part.value]));
   return {
     date: `${parts.year}-${parts.month}-${parts.day}`,

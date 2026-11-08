@@ -18,6 +18,7 @@ process.env.SMTP_FROM = "test@example.test";
 
 const { createApp } = await import("../src/app.js");
 const { tokenHash } = await import("../src/services/tokens.js");
+const { localParts } = await import("../src/services/appointments.js");
 const { Organization, User, Membership, Assistant, Session, Appointment, AgentAction, Customer, Conversation, Listing } = await import("../src/models/index.js");
 const app = createApp(async () => ({ text: "Test answer", inputTokens: 8, outputTokens: 3 }));
 const websiteOrigin = "https://example-business.test";
@@ -89,6 +90,7 @@ test("receptionist hours, time zones, confirmations, idempotency and concurrent 
     request(app).post(`/api/organizations/${orgA}/receptionist/actions`).set(dashboardHeaders).set("Cookie", cookieA).send(body(secondKey)),
   ]);
   assert.deepEqual([first.status, second.status].sort(), [201, 409]);
+  assert.equal((first.status === 409 ? first : second).body.error, "slot_taken");
   assert.equal(await Appointment.countDocuments({ organizationId: orgA, startAt: start, status: "booked" }), 1);
   const replay = await request(app).post(`/api/organizations/${orgA}/receptionist/actions`).set(dashboardHeaders).set("Cookie", cookieA).send(body(first.status === 201 ? firstKey : secondKey));
   assert.equal(replay.status, 200);
@@ -272,5 +274,42 @@ test("consented lead preferences, assignment and follow-up are scoped to staff",
   const unconsented = await Customer.create({ organizationId: orgA, name: "No consent", contact: "none@example.test", request: "Synthetic", consent: { recorded: false } });
   assert.equal((await request(app).patch(`/api/organizations/${orgA}/leads/${unconsented._id}`).set(dashboardHeaders).set("Cookie", cookieA)
     .send({ leadStatus: "qualified" })).status, 404);
+});
+
+test("expired widget proposal cannot create an appointment", async () => {
+  const owner = await Membership.findOne({ organizationId: orgA, role: "owner" }).lean();
+  assert.ok(owner);
+  const start = new Date(Date.now() + 9 * 86_400_000);
+  start.setUTCHours(10, 0, 0, 0);
+  const local = new Date(start.getTime() + 3 * 3_600_000);
+  const windows = [{ day: local.getUTCDay(), startMinute: 540, endMinute: 1020 }];
+  await request(app).patch(`/api/organizations/${orgA}/receptionist/hours`).set(dashboardHeaders).set("Cookie", cookieA)
+    .send({ timeZone: "Europe/Istanbul", openingHours: windows });
+  await request(app).put(`/api/organizations/${orgA}/receptionist/staff/${owner.userId}/availability`).set(dashboardHeaders).set("Cookie", cookieA).send({ windows });
+  const session = await request(app).post("/api/widget/sessions").set(websiteHeaders).send({ publicKey });
+  const proposalApp = createApp(async () => ({ text: "", inputTokens: 10, outputTokens: 4,
+    action: { name: "create_appointment", arguments: { staffId: owner.userId.toString(), startAt: start.toISOString(), durationMinutes: 30 } },
+  }));
+  const proposed = await request(proposalApp).post("/api/widget/messages").set(websiteHeaders)
+    .set("Authorization", `Bearer ${session.body.token}`).send({ text: "Book later", clientMessageId: crypto.randomUUID() });
+  assert.equal(proposed.status, 201, JSON.stringify(proposed.body));
+  await AgentAction.updateOne({ _id: proposed.body.action.id }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+  const expired = await request(app).post(`/api/widget/actions/${proposed.body.action.id}/confirm`).set(websiteHeaders)
+    .set("Authorization", `Bearer ${session.body.token}`).send({});
+  assert.equal(expired.status, 403);
+  assert.equal(await Appointment.countDocuments({ organizationId: orgA, startAt: start, status: "booked" }), 0);
+});
+
+test("IANA conversion distinguishes spring gap and repeated autumn hour", () => {
+  const zone = "Europe/Berlin";
+  const beforeGap = localParts(new Date("2027-03-28T00:30:00Z"), zone);
+  const afterGap = localParts(new Date("2027-03-28T01:30:00Z"), zone);
+  assert.equal(beforeGap.minute, 90);
+  assert.equal(afterGap.minute, 210);
+  const firstAutumn = localParts(new Date("2027-10-31T00:30:00Z"), zone);
+  const secondAutumn = localParts(new Date("2027-10-31T01:30:00Z"), zone);
+  assert.equal(firstAutumn.date, secondAutumn.date);
+  assert.equal(firstAutumn.minute, 150);
+  assert.equal(secondAutumn.minute, 150);
 });
 

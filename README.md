@@ -80,6 +80,8 @@ npm run typecheck
 npm run brand:check
 npm run build
 npm test
+npm run eval:deterministic -w apps/api
+npm run eval:typecheck -w apps/api
 npm run test:browser -w apps/web
 npm audit --audit-level=low
 ```
@@ -87,6 +89,8 @@ npm audit --audit-level=low
 `GET /health/live` confirms the API process is alive; `GET /health/ready` checks MongoDB connectivity. API tests use a real ephemeral MongoDB replica set and a fake AI responder. The Chromium widget test uses mocked API responses. Neither calls OpenAI. See [pilot report](PILOT_READINESS_REPORT.md) and [security review](docs/SECURITY_REVIEW.md) for remaining release gates.
 
 The explicit live OpenAI and SMTP checks require operator-set opt-in flags and dedicated credentials; see [staging runbook](STAGING_RUNBOOK.md). The [backup restore runbook](BACKUP_RESTORE_RUNBOOK.md) includes a local isolated restore rehearsal. Do not treat local Mailpit or mocked AI checks as proof of external delivery or billing.
+
+The [AI evaluation guide](apps/api/evals/README.md) describes the 68 synthetic EN/TR scenarios, deterministic backend checks, and guarded model-only comparison mode. Deterministic model scores do not establish real model accuracy.
 
 ## Documentation
 
@@ -100,6 +104,8 @@ The explicit live OpenAI and SMTP checks require operator-set opt-in flags and d
 - [GPT-6 Luna verification report](MODEL_VERIFICATION_REPORT.md)
 - [Phase 5 receptionist actions report](PHASE5_AGENT_ACTIONS_REPORT.md)
 - [Phase 6 business knowledge report](PHASE6_BUSINESS_KNOWLEDGE_REPORT.md)
+- [Phase 7 integration readiness report](PHASE7_INTEGRATION_READINESS_REPORT.md)
+- [Phase 8A AI evaluation report](PHASE8A_AI_EVALUATION_REPORT.md)
 - [Local HTTPS staging runbook](LOCAL_HTTPS_STAGING_RUNBOOK.md)
 - [Live provider verification gates](LIVE_PROVIDER_VERIFICATION.md)
 - [Staging runbook](STAGING_RUNBOOK.md)

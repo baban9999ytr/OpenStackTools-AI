@@ -25,7 +25,7 @@ Staff-entered knowledge is untrusted and can be returned to a visitor as busines
 | Check | Result |
 | --- | --- |
 | `npm test` | 29 API tests pass against ephemeral MongoDB replica sets, including Phase 5 appointment and budget regressions, knowledge CRUD/roles, listing filters, stale and archived behavior, widget retrieval, tenant isolation, consent, duplicate customer prevention, lead updates and stored prompt-injection carryover. AI replies are deterministic fakes. |
-| `npm run test:browser -w apps/web` | 10 Chromium Playwright tests pass. The new checks cover the editable Turkish real-estate template, mobile Turkish/dark Business screen, a knowledge save, responsive width and axe accessibility. Dashboard/widget APIs are mocked in browser tests. |
+| `npm run test:browser -w apps/web` | 10 Chromium Playwright tests pass. The new checks cover the editable Turkish real-estate template, mobile Turkish/dark Business screen, updating an existing knowledge record without sending database metadata, responsive width and axe accessibility. Dashboard/widget APIs are mocked in browser tests. |
 | `npm run typecheck`; `npm run build`; `npm run brand:check` | API and web TypeScript, production builds and brand token consistency pass. |
 | `npm audit --audit-level=low` | Zero reported vulnerabilities. |
 | Live GPT-6 Luna tool calling | **Not verified.** No approved provider credentials were configured or used. |

@@ -100,10 +100,13 @@ test("receptionist dashboard works on mobile in Turkish and dark theme", async (
 test("business knowledge and listings work on mobile in Turkish and dark theme", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockDashboard(page);
-  let saved = false;
+  let saved: Record<string, unknown> | null = null;
   await page.route("**/api/organizations/org1/knowledge", route => {
-    if (route.request().method() === "PUT") { saved = true; return route.fulfill({ json: { knowledge: route.request().postDataJSON() } }); }
-    return route.fulfill({ json: { knowledge: null } });
+    if (route.request().method() === "PUT") { saved = route.request().postDataJSON() as Record<string, unknown>; return route.fulfill({ json: { knowledge: saved } }); }
+    return route.fulfill({ json: { knowledge: { _id: "knowledge1", profile: "Old profile",
+      services: [{ _id: "service1", name: "Viewing", description: "Guided", price: "No charge" }],
+      faqs: [], policies: [], facts: [], contact: { _id: "contact1", email: "", phone: "", address: "", website: "" },
+    } } });
   });
   await page.route("**/api/organizations/org1/listings**", route => route.fulfill({ json: { listings: [] } }));
   await page.route("**/api/organizations/org1/conversation-summaries", route => route.fulfill({ json: { summaries: [] } }));
@@ -118,7 +121,9 @@ test("business knowledge and listings work on mobile in Turkish and dark theme",
   await expect(page.getByRole("heading", { name: "İşletme bilgileri" })).toBeVisible();
   await page.getByRole("textbox", { name: "İşletme profili" }).fill("Sentetik emlak ofisi");
   await page.getByRole("button", { name: "Bilgileri kaydet" }).click();
-  await expect.poll(() => saved).toBe(true);
+  await expect.poll(() => saved?.profile).toBe("Sentetik emlak ofisi");
+  expect(saved).not.toHaveProperty("_id");
+  expect((saved?.services as Array<Record<string, unknown>>)[0]).not.toHaveProperty("_id");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   const a11y = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(a11y.violations).toEqual([]);

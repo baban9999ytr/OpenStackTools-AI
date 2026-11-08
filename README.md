@@ -36,7 +36,7 @@ Use separate terminals for the two dev commands. Vite proxies `/api` to the back
 ## First use
 
 1. Register an organization and owner account in the dashboard, then verify the email link. Staff join through owner-sent invitations and set their own passwords.
-2. Create an assistant with instructions and an allowed website origin such as `http://localhost:5173`.
+2. Create an assistant with instructions and an allowed website origin such as `http://localhost:5173`. In **Business**, add only customer-safe knowledge and, if needed, current real-estate listings. Staff can track consented customer opportunities and follow-ups there. Listing recommendations use stored available records updated within 30 days; they never scrape external sites.
 3. Add the following script to a site hosted at one of that assistant's allowed origins, using the assistant's public key:
 
 ```html
@@ -99,6 +99,7 @@ The explicit live OpenAI and SMTP checks require operator-set opt-in flags and d
 - [Phase 4A local staging report](PHASE4A_LOCAL_STAGING_REPORT.md)
 - [GPT-6 Luna verification report](MODEL_VERIFICATION_REPORT.md)
 - [Phase 5 receptionist actions report](PHASE5_AGENT_ACTIONS_REPORT.md)
+- [Phase 6 business knowledge report](PHASE6_BUSINESS_KNOWLEDGE_REPORT.md)
 - [Local HTTPS staging runbook](LOCAL_HTTPS_STAGING_RUNBOOK.md)
 - [Live provider verification gates](LIVE_PROVIDER_VERIFICATION.md)
 - [Staging runbook](STAGING_RUNBOOK.md)

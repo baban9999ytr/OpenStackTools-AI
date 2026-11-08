@@ -55,6 +55,7 @@ const translations: Record<string, string> = {
   Description: "Açıklama", Price: "Fiyat", Question: "Soru", Answer: "Yanıt", Text: "Metin", Value: "Değer", Label: "Etiket",
   "Save knowledge": "Bilgileri kaydet", "Business knowledge saved.": "İşletme bilgileri kaydedildi.", Add: "Ekle",
   "Property listings": "Emlak ilanları", "Search location": "Konuma göre ara", Search: "Ara",
+  "Use real-estate template": "Emlak şablonunu kullan", "Template fills instructions; review before saving.": "Şablon talimatları doldurur; kaydetmeden önce gözden geçirin.",
   "No matching listings.": "Eşleşen ilan yok.", Updated: "Güncellendi", Edit: "Düzenle", Archive: "Arşivle",
   "Edit listing": "İlanı düzenle", "Add listing": "İlan ekle", Title: "Başlık", Location: "Konum",
   Currency: "Para birimi", "Property type": "Mülk türü", Rooms: "Oda sayısı", "Area (m²)": "Alan (m²)",

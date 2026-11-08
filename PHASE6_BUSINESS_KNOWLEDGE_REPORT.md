@@ -12,6 +12,8 @@ The existing `Customer` record now supports requirements, budget range, location
 
 Two fixed AI actions, `get_business_knowledge` and `search_listings`, accept strict backend-validated arguments. The model cannot submit a database query or choose an arbitrary action executor. The server performs retrieval with an organization predicate and sends a deterministic result to the visitor. Knowledge text is not inserted into the system instructions; retrieval response messages are omitted from later model context. The dashboard's conversation summaries are recent message excerpts and are labelled as such, not AI-generated summaries.
 
+Assistant creation includes an editable English/Turkish real-estate instruction starter. It asks for preferences and directs the assistant to backend retrieval and human handoff. It contains no sample property records or invented prices; an owner reviews it before saving.
+
 ## Security and data lifecycle
 
 All staff endpoints require an authenticated organization role; business knowledge changes require owner/admin, listing and lead mutations require owner/admin/agent. Widget retrieval uses the session's organization ID. Inputs have fixed field lengths and counts. Search location is escaped before use in a bounded case-insensitive regex. Active knowledge and listings persist until edited or tenant deletion. Archived listings follow the organization's configured retention window. Owner export and confirmed tenant deletion include both new collections.
@@ -23,7 +25,7 @@ Staff-entered knowledge is untrusted and can be returned to a visitor as busines
 | Check | Result |
 | --- | --- |
 | `npm test` | 29 API tests pass against ephemeral MongoDB replica sets, including Phase 5 appointment and budget regressions, knowledge CRUD/roles, listing filters, stale and archived behavior, widget retrieval, tenant isolation, consent, duplicate customer prevention, lead updates and stored prompt-injection carryover. AI replies are deterministic fakes. |
-| `npm run test:browser -w apps/web` | 10 Chromium Playwright tests pass. The new test covers the mobile Turkish/dark Business screen, a knowledge save, responsive width and axe accessibility. Dashboard/widget APIs are mocked in browser tests. |
+| `npm run test:browser -w apps/web` | 10 Chromium Playwright tests pass. The new checks cover the editable Turkish real-estate template, mobile Turkish/dark Business screen, a knowledge save, responsive width and axe accessibility. Dashboard/widget APIs are mocked in browser tests. |
 | `npm run typecheck`; `npm run build`; `npm run brand:check` | API and web TypeScript, production builds and brand token consistency pass. |
 | `npm audit --audit-level=low` | Zero reported vulnerabilities. |
 | Live GPT-6 Luna tool calling | **Not verified.** No approved provider credentials were configured or used. |

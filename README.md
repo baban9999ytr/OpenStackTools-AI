@@ -36,7 +36,7 @@ Use separate terminals for the two dev commands. Vite proxies `/api` to the back
 ## First use
 
 1. Register an organization and owner account in the dashboard, then verify the email link. Staff join through owner-sent invitations and set their own passwords.
-2. Create an assistant with instructions and an allowed website origin such as `http://localhost:5173`. In **Business**, add only customer-safe knowledge and, if needed, current real-estate listings. Staff can track consented customer opportunities and follow-ups there. Listing recommendations use stored available records updated within 30 days; they never scrape external sites.
+2. Create an assistant with instructions and an allowed website origin such as `http://localhost:5173`. An editable EN/TR real-estate instruction template is available in the form. In **Business**, add only customer-safe knowledge and, if needed, current real-estate listings. Staff can track consented customer opportunities and follow-ups there. Listing recommendations use stored available records updated within 30 days; they never scrape external sites.
 3. Add the following script to a site hosted at one of that assistant's allowed origins, using the assistant's public key:
 
 ```html

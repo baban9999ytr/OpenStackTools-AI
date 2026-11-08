@@ -85,6 +85,8 @@ test("receptionist dashboard works on mobile in Turkish and dark theme", async (
   await page.goto("http://127.0.0.1:5173/app");
   await page.getByRole("button", { name: "Theme" }).click();
   await page.getByRole("button", { name: "Language" }).click();
+  await page.getByRole("button", { name: "Emlak şablonunu kullan" }).click();
+  await expect(page.getByRole("textbox", { name: "Talimatlar" })).toHaveValue(/search_listings/);
   await page.getByRole("button", { name: "Menü" }).click();
   await page.getByRole("button", { name: "Resepsiyon" }).click();
   await expect(page.getByRole("heading", { name: "Randevular" })).toBeVisible();

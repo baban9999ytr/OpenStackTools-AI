@@ -15,6 +15,10 @@ type Account = { id: string; name: string; email: string };
 type Me = { user: Account; organizations: Organization[] };
 const getError = (error: unknown) =>
   error instanceof Error ? error.message : "Something went wrong";
+const realEstateTemplate = {
+  en: "You are a real-estate assistant for this business. Ask for the visitor's budget, currency, preferred location, property type, rooms, and minimum area when relevant. Use search_listings to retrieve current available properties. Mention only listings, prices, and URLs returned by the backend. Use get_business_knowledge for verified services, policies, hours, and contact details. If no listing matches or information is missing, say so and offer a human handoff. Ask for consent before saving contact details. Do not claim an appointment is booked until the backend confirms it.",
+  tr: "Bu işletmenin emlak asistanısınız. Gerekli olduğunda ziyaretçinin bütçesini, para birimini, tercih ettiği konumu, mülk türünü, oda sayısını ve asgari alanı sorun. Güncel ve uygun mülkleri search_listings ile alın. Yalnızca sunucunun döndürdüğü ilanları, fiyatları ve bağlantıları belirtin. Doğrulanmış hizmet, politika, çalışma saati ve iletişim bilgileri için get_business_knowledge kullanın. Eşleşen ilan veya bilgi yoksa bunu söyleyin ve insan temsilciye aktarmayı önerin. İletişim bilgilerini kaydetmeden önce onay isteyin. Sunucu doğrulamadan randevunun oluşturulduğunu söylemeyin.",
+} as const;
 
 function AuthScreen({ onSuccess }: { onSuccess: () => void }) {
   const { t, locale, setLocale, theme, setTheme } = usePreferences();
@@ -619,6 +623,11 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                       defaultValue={editingAssistant?.instructions}
                     />
                   </label>
+                  <button type="button" className="secondary" onClick={(event) => {
+                    const field = event.currentTarget.closest("form")?.querySelector<HTMLTextAreaElement>('textarea[name="instructions"]');
+                    if (field) field.value = realEstateTemplate[locale];
+                  }}>{t("Use real-estate template")}</button>
+                  <p className="muted">{t("Template fills instructions; review before saving.")}</p>
                   <label>
                     {t("Allowed website origins")}{" "}
                     <small>{t("One exact origin per line")}</small>

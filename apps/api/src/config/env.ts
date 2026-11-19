@@ -15,6 +15,8 @@ export const env = {
   openaiModel: must("OPENAI_MODEL"),
   reasoningEffort: process.env.OPENAI_REASONING_EFFORT?.trim() || undefined,
   maxCompletionTokens: Number(process.env.OPENAI_MAX_COMPLETION_TOKENS ?? 800),
+  automaticMaxRequestMicros: process.env.AI_AUTOMATIC_MAX_REQUEST_USD
+    ? parseUsdMicros(process.env.AI_AUTOMATIC_MAX_REQUEST_USD) : undefined,
   defaultDailyBudgetMicros: parseUsdMicros(must("DEFAULT_DAILY_BUDGET_USD")),
   defaultMonthlyBudgetMicros: parseUsdMicros(
     must("DEFAULT_MONTHLY_BUDGET_USD"),

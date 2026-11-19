@@ -12,7 +12,7 @@ export const listingFollowUpIntent = (query: string, hasPrior: boolean): Listing
   if (/hizmet|service|iletişim|contact|çalışma saat|opening hour|randevu|appointment|insan|human/i.test(query)) return "topic";
   if (/farklı.{0,25}mahalle|başka.{0,25}mahalle|different neighborhood|other neighborhood/i.test(query)) return "broaden";
   if (/\b(?:buy|purchase|rent|rental)\b|satın al|satılık|kiralık|bütçe|budget|\bunder\b|altında|\b\d+\s*\+\s*1\b|oda sayısı|room count|yeni arama|new search/i.test(query)) return "search";
-  if (/\b(?:balcony|balconies|parking|elevator)\b|balkon|otopark|asansör/i.test(query)) return "attribute";
+  if (/\b(?:balcony|balconies|parking|elevator|dues)\b|balkon|otopark|asansör|aidat|maintenance fee/i.test(query)) return "attribute";
   if (/öner|tavsiye|hangisini seç|hangisi daha iyi|recommend|which one|compare|karşılaştır/i.test(query)) return "recommend";
   if (/ucuzdan pahalıya|pahalıdan ucuza|cheapest first|lowest to highest|highest to lowest/i.test(query)) return "sort";
   if (/ucuz olan|pahalı olan|cheaper one|more expensive one|\b(?:it|that one|those apartments)\b|onun|o daire|daha ucuz|daha pahalı|o ilanlar|önceki ilan|back to/i.test(query)) return "reference";
@@ -39,8 +39,8 @@ export const formatListingReply = (raw: VerifiedListing[], options: ListingReply
   const ascending = /en ucuzdan pahalıya|ucuzdan pahalıya|lowest to highest|cheapest first|price ascending/i.test(query);
   const descending = /en pahalıdan ucuza|pahalıdan ucuza|highest to lowest|most expensive first|price descending/i.test(query);
   if (ascending || descending) listings.sort((a, b) => (a.price - b.price) * (descending ? -1 : 1));
-  const ordinal = /(?:ilk|birinci|first)\s+(?:ilan|listing|property)/i.test(query) ? 0
-    : /(?:ikinci|second)\s+(?:ilan|listing|property)/i.test(query) ? 1 : -1;
+  const ordinal = /(?:[iİ]lk|birinci|first)\s+(?:ilan|listing|property)/i.test(query) ? 0
+    : /(?:[iİ]kinci|second)\s+(?:ilan|listing|property)/i.test(query) ? 1 : -1;
   const namedIndex = options.reused ? listings.findIndex((item) => {
     const name = item.title.replace(/^DEMO\s*[—-]\s*/i, "").toLocaleLowerCase("tr");
     return name.length >= 8 && query.toLocaleLowerCase("tr").includes(name);
@@ -52,7 +52,8 @@ export const formatListingReply = (raw: VerifiedListing[], options: ListingReply
     ? -1 : listings.findIndex((item) => item.price === extreme);
   const chosenIndex = namedIndex >= 0 ? namedIndex : ordinal >= 0 ? ordinal : priceIndex;
   const selected = chosenIndex >= 0 && options.reused ? listings.slice(chosenIndex, chosenIndex + 1) : listings;
-  const attribute = /\b(?:balcony|balconies)\b|balkon/i.test(query) ? { en: "balcony", tr: "balkon" }
+  const attribute = /aidat|maintenance fee|\bdues\b/i.test(query) ? { en: "maintenance fee", tr: "aidat" }
+    : /\b(?:balcony|balconies)\b|balkon/i.test(query) ? { en: "balcony", tr: "balkon" }
     : /\bparking\b|otopark/i.test(query) ? { en: "parking", tr: "otopark" }
       : /\belevator\b|asansör/i.test(query) ? { en: "elevator", tr: "asansör" } : null;
   if (attribute && options.reused && selected.length !== 1) return tr
@@ -60,7 +61,7 @@ export const formatListingReply = (raw: VerifiedListing[], options: ListingReply
     : "Which listing do you mean? I can check its stored details.";
   if (attribute && selected.length === 1 && options.reused) {
     const item = selected[0]!;
-    const confirmed = new RegExp(`${attribute.en}|${attribute.tr}`, "i").test(item.description ?? "");
+    const confirmed = attribute.en !== "maintenance fee" && new RegExp(`${attribute.en}|${attribute.tr}`, "i").test(item.description ?? "");
     return confirmed ? tr ? `${item.title} ilanının açıklamasında ${attribute.tr} belirtiliyor. Ayrıntıları danışmanla doğrulamak ister misiniz?`
       : `${item.title} mentions ${attribute.en} in its stored description. Would you like staff to confirm the details?`
       : tr ? `${item.title} için ${attribute.tr} bilgisi kayıtlı ilanda doğrulanmamış. İsterseniz danışmana sorabilirim.`

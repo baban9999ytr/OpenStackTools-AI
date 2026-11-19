@@ -310,7 +310,7 @@ test("four product modes persist and Automatic executes through the durable queu
     const completed = await send();
     assert.equal(completed?.status, "completed");
     assert.equal(completed?.aiModel, "gpt-6-luna");
-    assert.equal(completed?.aiRoutingPolicy, "astra-routing-v1");
+    assert.equal(completed?.aiRoutingPolicy, "astra-routing-v2");
     const usage = await UsageEvent.findOne({ requestId: completed?._id }).lean();
     assert.equal(usage?.model, "gpt-6-luna");
     assert.equal(usage?.inputTokens, 10);

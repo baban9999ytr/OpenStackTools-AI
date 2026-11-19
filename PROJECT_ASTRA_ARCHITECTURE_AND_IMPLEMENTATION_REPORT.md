@@ -316,3 +316,9 @@ Local runs used Node 24. The first new evaluator typecheck found widened listing
 | Live model evaluation | Gate rejection checked locally. Provider execution and access pending. |
 
 Public SaaS and a real-customer pilot remain gated on hosted CI, authorized live-model and channel checks, managed operations, privacy rehearsals and support ownership. Prioritize verified listing attributes, structured contact consent and staff notifications before broader self-service and billing. [Evaluation evidence](ASTRA_PHASE_2C_EVALUATION_REPORT.md) · [Phase 3 readiness plan](SAAS_RELEASE_READINESS_REPORT.md)
+
+## Phase 2D — live benchmark preparation and adaptive routing (2026-11-19)
+
+The existing isolated queue benchmark now has explicit preflight, per-model and global reservations, bounded context and request counts, provider uncertainty handling and reviewable bilingual reports. Five conversations and 60 simulated turns passed across three candidate configurations. Policy v2 classifies task complexity and checks actual tenant budget headroom. The production premium gate remains false, so Automatic uses authorized Luna. Budget withdrawal and Turkish ordinal/unknown dues handling received end-to-end regression coverage.
+
+The local suite passed 109 API tests and 17 browser tests. The 128-scenario deterministic suite retained four intentional backend skips. Installation, typechecks, production builds, audit, brand check and workflow lint passed. **LIVE MODEL QUALITY NOT YET VERIFIED.** Hosted execution for these changes and authenticated provider entitlement remain pending. [Implementation and evidence](ASTRA_PHASE_2D_MODEL_INTELLIGENCE_REPORT.md) · [Model comparison and human review](ASTRA_MODEL_COMPARISON_REPORT.md)

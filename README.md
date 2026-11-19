@@ -81,6 +81,7 @@ Enable **Conversation strategy → Real estate preferences and follow-up** to re
 | `OPENAI_MODEL` / `OPENAI_REASONING_EFFORT` | Legacy Chat Completions fallback and optional reasoning effort when an assistant has no saved selection |
 | `AI_ENABLED_MODELS` | Operator allowlist for explicit selections. Defaults to Luna. Organizations may narrow it. |
 | `AI_VERIFIED_MODELS` | Empty by default. Add documented model IDs only after verifying project entitlement, Responses capabilities and applicable Standard pricing. Required for product modes in addition to both allowlists. |
+| `AI_AUTOMATIC_MAX_REQUEST_USD` | Optional ceiling for the full Automatic request reservation. If omitted, remaining daily and monthly tenant budget determines the ceiling. |
 | `AI_MAX_REASONING_EFFORT` | Platform ceiling for tenant-selected reasoning; defaults to `medium`. Organization policy may set a stricter limit. |
 | `OPENAI_MAX_COMPLETION_TOKENS` | Maximum output including reasoning tokens (1–800) |
 | `APPOINTMENT_MORNING_WINDOW` / `APPOINTMENT_AFTERNOON_WINDOW` / `APPOINTMENT_EVENING_WINDOW` | Business-local, nonoverlapping 15-minute aligned periods for natural-language availability requests; defaults `09:00-12:00`, `12:00-17:00`, `17:00-21:00`. Organization and staff hours further restrict them. |

@@ -27,3 +27,65 @@ export function routeAutomatic(input: RoutingInput): RoutingDecision {
     ![model.prices.cachedInput, model.prices.cacheWrite].every((price) => Number.isSafeInteger(price) && price >= 0)) return unavailable("pricing");
   return { kind: "model", model: input.baseline, reason: "authorized_baseline", policyVersion };
 }
+
+export type RoutingComplexity = "simple" | "moderate" | "complex";
+export function classifyRoutingTask(signals: { recognizedIntents: number; ambiguous: boolean; activeWorkflow: boolean;
+  hasReferences: boolean; readOnly: boolean }): RoutingComplexity {
+  if (signals.ambiguous || (signals.activeWorkflow && signals.hasReferences) || signals.recognizedIntents >= 3)
+    return "complex";
+  return !signals.readOnly || signals.activeWorkflow || signals.hasReferences || signals.recognizedIntents >= 2
+    ? "moderate" : "simple";
+}
+
+type EvaluatedCandidate = {
+  model: ModelId;
+  task: RoutingComplexity;
+  samples: number;
+  qualityGainBasisPoints: number;
+  safetyFailures: number;
+  latencyP95Ms: number;
+};
+
+type AdaptiveInput = RoutingInput & {
+  complexity: RoutingComplexity;
+  readOnly: boolean;
+  premiumApproved: boolean;
+  verified: readonly string[];
+  maxRequestMicros: number;
+  reservationFor: (model: ModelId) => number | undefined;
+  evidence: readonly EvaluatedCandidate[];
+};
+const adaptiveVersion = "astra-routing-v2" as const;
+
+export function routeAdaptive(input: AdaptiveInput) {
+  const baseline = routeAutomatic(input);
+  if (baseline.kind === "unavailable") return { ...baseline, policyVersion: adaptiveVersion };
+  const withinBudget = (model: ModelId) => {
+    const amount = input.reservationFor(model);
+    return amount !== undefined && Number.isSafeInteger(amount) && amount > 0 &&
+      amount <= Math.min(input.maxRequestMicros, input.remainingBudgetMicros);
+  };
+  if (!input.verified.includes(baseline.model))
+    return { kind: "unavailable", reason: "entitlement", policyVersion: adaptiveVersion } as const;
+  if (!withinBudget(baseline.model))
+    return { kind: "unavailable", reason: "budget", policyVersion: adaptiveVersion } as const;
+  if (input.premiumApproved && input.readOnly && input.complexity === "complex") {
+    const candidates = input.evidence.filter((item) => {
+      if (item.model === baseline.model || !Object.hasOwn(modelRegistry, item.model)) return false;
+      const model = modelRegistry[item.model];
+      return item.task === input.complexity && item.safetyFailures === 0 &&
+        Number.isSafeInteger(item.samples) && item.samples >= 30 &&
+        Number.isSafeInteger(item.qualityGainBasisPoints) && item.qualityGainBasisPoints >= 500 &&
+        item.qualityGainBasisPoints <= 10_000 &&
+        item.latencyP95Ms > 0 && item.latencyP95Ms <= input.remainingDeadlineMs &&
+        input.platformAllowed.includes(item.model) && input.organizationAllowed.includes(item.model) &&
+        input.verified.includes(item.model) && model.endpoint === "responses" &&
+        (!input.requiredTools || model.functions) && model.structuredOutputs &&
+        Object.values(model.prices).every((value) => Number.isSafeInteger(value) && value > 0) && withinBudget(item.model);
+    });
+    candidates.sort((a, b) => input.reservationFor(a.model)! - input.reservationFor(b.model)!);
+    const candidate = candidates[0];
+    if (candidate) return { kind: "model", model: candidate.model, reason: "measured_improvement", policyVersion: adaptiveVersion } as const;
+  }
+  return { ...baseline, policyVersion: adaptiveVersion };
+}

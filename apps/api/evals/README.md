@@ -18,9 +18,18 @@ The JSON contains expected and observed preferences, tool calls, arguments, work
 
 For separately authorized experiments use `npm run eval:live -w apps/api`. This supersedes the historical direct model-only command. The runner requires:
 
-- `EVAL_LIVE=1`, `EVAL_SPEND_APPROVED=1`, `EVAL_DEDICATED_PROJECT_CONFIRMED=1` and `EVAL_SYNTHETIC_TENANT_CONFIRMED=1`.
+- `EVAL_LIVE=1`, `EVAL_SPEND_APPROVED=1`, `EVAL_DEDICATED_PROJECT_CONFIRMED=1`, `EVAL_SYNTHETIC_TENANT_CONFIRMED=1` and `EVAL_STANDARD_PRICING_CONFIRMED=1`.
 - `EVAL_PROJECT_API_KEY` for a dedicated OpenAI project and `EVAL_VERIFIED_MODELS` listing the three reviewed candidate IDs. These attestations rely on the operator to verify actual entitlement.
 - `EVAL_PRICE_VERSION` matching the registry and `EVAL_PRICE_CHECKED_AT` set to a UTC timestamp in the preceding seven days after checking applicable Standard prices and cache ceilings. If prices differ from the registry, update and review the registry before running.
-- `EVAL_MAX_SPEND_MICROS` between 1 and 1000000, `EVAL_MAX_REQUESTS_PER_MODEL` between 1 and 18, and a private, unused `EVAL_REPORT_PATH`.
+- `EVAL_MAX_SPEND_MICROS` between 1 and 1000000, `EVAL_MAX_MODEL_SPEND_MICROS` between 1 and the global limit, `EVAL_MAX_REQUESTS_PER_MODEL` between 1 and 18, and a private, unused `EVAL_REPORT_PATH`.
 
 Each candidate receives the same medium reasoning setting and 128 output-token cap. The SDK uses a 30-second deadline with retries disabled. Each run uses a fresh local replica set and synthetic tenants. The existing atomic tenant budget check and a serial run-wide reservation gate both apply. A provider failure retains the uncertain reservation and stops subsequent calls. The run may end before all models if the remaining cap cannot admit the next request. Reconcile estimates against dedicated-project provider usage. The comparison fixes synthesis off and leaves naturalness and semantic factuality for human review.
+
+
+## Phase 2D operator procedure
+
+1. Run the offline benchmark and use the per-turn reservations to size the global and per-model allowance. Estimates can vary with generated history. Use a fresh, dedicated provider project and review its billing limits, entitlements, endpoint and Standard rates.
+2. Inject the dedicated key using a local secret store. Supply the explicit flags and amounts above in the process environment. The benchmark does not source opt-ins from application dotenv files.
+3. Run `EVAL_PREFLIGHT_ONLY=1 npm run eval:live -w apps/api` to validate local admission. This command exits before opening the report, starting the replica set or constructing the provider client. Entitlement remains an operator attestation.
+4. After separate authorization for billable requests, unset `EVAL_PREFLIGHT_ONLY`, set `EVAL_EXECUTE_APPROVED=1` and run the live command. Use a new private report path. The isolated application sets both tenant budget windows to the per-model cap. It also enforces the configured request count, a conservative 40,000-input-token bound, 128 maximum output tokens and the SDK's 30-second timeout.
+5. Compare identical customer turns and note any model-visible history divergence. Reconcile reported token totals and uncertain reservations against the dedicated project invoice. Keep automated assertions separate from human judgments. Review rubric and capability verification are in the [comparison report](../../../ASTRA_MODEL_COMPARISON_REPORT.md).

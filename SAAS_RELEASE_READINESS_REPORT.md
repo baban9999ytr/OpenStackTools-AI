@@ -23,3 +23,9 @@ Evidence sources include the current routes and services and the [architecture](
 2. **Pilot gate.** Rehearse HTTPS, sandbox SMTP verification/recovery, Telegram outbox uncertainty, restore, retention, tenant deletion and staff takeover in controlled staging. Assign a support owner and measure queue age, provider failures, budget denials, delivery uncertainty and recovery time.
 3. **Pilot value.** Add verified amenities and dues, optional scoped phone consent, staff notifications and follow-up assignments. Add acceptance checks for disclosure, tenant access, callback consent and expiry.
 4. **Public SaaS gate.** Implement plan entitlements, subscription events and invoice/reconciliation workflows. Add abuse monitoring, support escalation, privacy and contractual review, backup schedules, multi-instance load tests and a release rollback procedure.
+
+## Phase 2D update
+
+The local benchmark now has a separate provider-free preflight, explicit run-wide and per-model spend limits and a human review rubric. The first paid experiment still needs separate approval, dedicated provider access, pricing and quota review, and synthetic-only execution. Public model documentation does not establish entitlement. The five-conversation suite verifies queue and accounting behavior using simulated providers. It provides no evidence for a premium model's production quality.
+
+Keep Luna-only Automatic for the pilot. Before considering premium selection, collect paired task evidence, review Turkish and English results, reconcile invoice cost, verify terminal and uncertain failures and approve the evidence source. The operational gates above still apply. [Phase 2D evidence](ASTRA_PHASE_2D_MODEL_INTELLIGENCE_REPORT.md)

@@ -1,6 +1,6 @@
 import { extractBusinessTurn, validateBusinessProposal } from "./business-conversation.js";
 import { composeBusinessTurn, viewingFollowUp } from "./business-conversation-runtime.js";
-import { routeAutomatic } from "./automatic-routing.js";
+import { classifyRoutingTask, routeAdaptive } from "./automatic-routing.js";
 import mongoose from "mongoose";
 import {
   AgentAction,
@@ -25,6 +25,7 @@ import {
   maximumReservationMicros,
   measuredCostMicros,
   reserveBudget,
+  remainingOrganizationBudget,
   settleWindows,
 } from "./budget.js";
 import { env } from "../config/env.js";
@@ -43,7 +44,7 @@ import { introducedName, isViewingRequest, nameAnswer, personalityInstructions, 
 import { prohibitedOperationalRequest, safetyReply } from "./conversation-safety.js";
 import { interpretVisitorTurn, planVisitorTurn, verifiedListingInformation, validatePreferenceCandidate } from "./turn-interpretation.js";
 import { flexibleDatePlan, findFlexibleSlots, type OfferedSlot } from "./flexible-scheduling.js";
-import { configuredMaxEffort, configuredModels, resolveModel, type EffectiveModel, type Effort } from "./model-config.js";
+import { configuredMaxEffort, configuredModels, resolveModel, verifiedModels, type EffectiveModel, type Effort } from "./model-config.js";
 
 const LEASE_MS = 120_000;
 const MAX_ATTEMPTS = 2;
@@ -563,6 +564,7 @@ export const processWidgetRequest = async (
     }
     return;
   }
+  const processingStarted = performance.now();
   let modelCalls = 0;
   let modelAction = "none";
   let selectedAction = "none";
@@ -572,10 +574,11 @@ export const processWidgetRequest = async (
   let priorListingCount = 0;
   let availabilityDecision: Record<string, string | number> | undefined;
   const diagnostic = (answer?: AIReply) => logger.info({
-    requestId: requestId.toString(), conversationId: request.conversationId.toString(),
-    modelAction, selectedAction, followUpIntent, priorListingCount, availabilityDecision,
+    requestId: requestId.toString(), conversationId: request.conversationId.toString(), organizationId: request.organizationId.toString(),
+    latencyMs: Math.round(performance.now() - processingStarted), modelAction, selectedAction, followUpIntent, priorListingCount, availabilityDecision,
     synthesisOutcome, fallbackReason, modelCalls,
     inputTokens: answer?.inputTokens ?? 0, outputTokens: answer?.outputTokens ?? 0,
+    reasoningTokens: answer?.reasoningTokens ?? 0, cachedInputTokens: answer?.cachedInputTokens ?? 0,
   }, "Widget AI decision");
   try {
     const assistant = await Assistant.findOne({
@@ -1194,21 +1197,31 @@ export const processWidgetRequest = async (
     const configuration = resolveModel(assistant.modelSelection, orgAllowed?.length
       ? configuredModels().filter((id) => orgAllowed.includes(id)) : configuredModels(),
     (organization?.maxReasoningEffort ?? configuredMaxEffort()) as Effort);
+    respond = respond.forModel?.(configuration) ?? respond;
+    const reservation = maximumReservationMicros(fullInstructions, history, configuration) +
+      (respond.synthesize ? maximumReservationMicros(`${fullInstructions}\n${"x".repeat(8000)}`, history, configuration) : 0);
     if (assistant.modelSelection?.mode === "product" && assistant.modelSelection.choice === "automatic") {
-      const decision = routeAutomatic({ baseline: "gpt-6-luna", platformAllowed: configuredModels(),
+      // The application has no approval or evidence store yet. No request or environment flag can override this gate.
+      const readOnly = ["attribute", "recommend", "sort", "reference", "broaden", "search"].includes(followUpIntent) &&
+        !activeWorkflow && !asksForSchedulingAvailability(request.text);
+      const complexity = classifyRoutingTask({ recognizedIntents: interpreted.intents.length,
+        ambiguous: interpreted.needsClarification, activeWorkflow, hasReferences: priorListingCount > 0, readOnly });
+      const remainingBudgetMicros = await remainingOrganizationBudget(request.organizationId,
+        organization?.dailyBudgetMicros ?? 0, organization?.monthlyBudgetMicros ?? 0);
+      const decision = routeAdaptive({ baseline: "gpt-6-luna", platformAllowed: configuredModels(),
         organizationAllowed: orgAllowed?.length ? orgAllowed : configuredModels(), requiredTools: true,
-        remainingDeadlineMs: 120_000 - (Date.now() - new Date(request.createdAt).getTime()),
-        remainingBudgetMicros: Math.min(organization?.dailyBudgetMicros ?? 0, organization?.monthlyBudgetMicros ?? 0) });
+        remainingDeadlineMs: LEASE_MS - (Date.now() - new Date(request.createdAt).getTime()),
+        remainingBudgetMicros,
+        complexity, readOnly, premiumApproved: false, evidence: [], verified: verifiedModels(),
+        maxRequestMicros: env.automaticMaxRequestMicros ?? remainingBudgetMicros,
+        reservationFor: (model) => model === configuration.model ? reservation : undefined });
       if (decision.kind === "unavailable" && decision.reason === "budget") throw new BudgetExceeded();
       if (decision.kind !== "model" || decision.model !== configuration.model) throw new Error("Automatic routing unavailable");
       await WidgetRequest.updateOne({ _id: requestId, status: "processing" }, { $set: { aiRoutingPolicy: decision.policyVersion } });
       logger.info({ requestId: requestId.toString(), organizationId: request.organizationId.toString(),
-        selectedMode: "automatic", model: configuration.model, policyVersion: decision.policyVersion,
+        selectedMode: "automatic", model: configuration.model, policyVersion: decision.policyVersion, complexity,
         reason: decision.reason, reasoningEffort: configuration.reasoningEffort }, "AI routing decision");
     }
-    respond = respond.forModel?.(configuration) ?? respond;
-    const reservation = maximumReservationMicros(fullInstructions, history, configuration) +
-      (respond.synthesize ? maximumReservationMicros(`${fullInstructions}\n${"x".repeat(8000)}`, history, configuration) : 0);
     await WidgetRequest.updateOne({ _id: requestId, status: "processing" }, { $set: {
       aiModel: configuration.model, aiPricingVersion: configuration.pricingVersion } });
     if (!(await reserveBudget(requestId, reservation)))
@@ -1227,6 +1240,7 @@ export const processWidgetRequest = async (
       answer.text = result?.text ?? (currentLocale === "tr" ? "Hangi tercihi değiştirmek istediğinizi netleştirir misiniz?"
         : "Could you clarify which preference you want to change?");
       if (result?.actionId) (answer as AIReply & { actionId?: mongoose.Types.ObjectId }).actionId = result.actionId;
+      diagnostic(answer);
       await finalizeSuccess(requestId, answer, configuration); return;
     }
     if (answer.action?.name === "interpret_preferences") {

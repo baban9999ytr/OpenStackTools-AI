@@ -55,15 +55,15 @@ export const measuredCostMicros = (
 
 // Deliberately conservative: byte count is multiplied before adding a fixed
 // allowance for message framing. Actual provider usage is reconciled afterward.
+export const upperInputTokenBound = (instructions: string, history: Turn[]) =>
+  (Buffer.byteLength(instructions) + history.reduce((sum, turn) => sum + Buffer.byteLength(turn.text), 0)) * 4 + 4096;
+
 export const maximumReservationMicros = (
   instructions: string,
   history: Turn[],
   configuration?: EffectiveModel,
 ) => {
-  const bytes =
-    Buffer.byteLength(instructions) +
-    history.reduce((sum, turn) => sum + Buffer.byteLength(turn.text), 0);
-  const upperInputTokens = bytes * 4 + 4096;
+  const upperInputTokens = upperInputTokenBound(instructions, history);
   if (!Number.isSafeInteger(upperInputTokens))
     throw new Error("Context too large");
   if (configuration?.mode === "product" && upperInputTokens > 272_000)
@@ -72,6 +72,19 @@ export const maximumReservationMicros = (
   // case; three microdollars cover per-category rounding on settlement.
   return measuredCostMicros(upperInputTokens, MAX_COMPLETION_TOKENS, {}, configuration) + 3;
 };
+
+export async function remainingOrganizationBudget(organizationId: mongoose.Types.ObjectId, daily: number, monthly: number) {
+  if (![daily, monthly].every((limit) => Number.isSafeInteger(limit) && limit > 0)) return 0;
+  const periods = utcPeriods();
+  const windows = await BudgetWindow.find({ organizationId, $or: [
+    { kind: "day", periodStart: periods.day }, { kind: "month", periodStart: periods.month },
+  ] }).select("kind spentMicros reservedMicros").lean();
+  const remaining = (kind: "day" | "month", limit: number) => {
+    const window = windows.find((item) => item.kind === kind);
+    return limit - (window?.spentMicros ?? 0) - (window?.reservedMicros ?? 0);
+  };
+  return Math.max(0, Math.min(remaining("day", daily), remaining("month", monthly)));
+}
 
 const ensureWindow = async (
   organizationId: mongoose.Types.ObjectId,

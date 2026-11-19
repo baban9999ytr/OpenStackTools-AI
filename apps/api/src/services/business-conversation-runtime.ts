@@ -21,6 +21,13 @@ export async function composeBusinessTurn(context: { organizationId: Types.Objec
   const previous = businessStateSchema.safeParse(prior).data;
   const searchChange = Object.entries(turn.updates).some(([field, entry]) => field !== "name" &&
     previous?.values[field as keyof BusinessState["values"]]?.value !== entry?.value);
+  if (turn.withdrawBudget && !turn.topicChange) {
+    if (!previous?.values.budget || state.refused.includes("budget"))
+      return { state, text: tr ? "Aramaya bir bütçe sınırı olmadan devam edebiliriz." : "We can continue without a budget limit." };
+    const follow = realEstateFollowUp(state, context.locale, 0);
+    return { state: follow.state, text: (tr ? "Önceki bütçe sınırını kaldırdım." : "I removed the previous budget limit.") +
+      (follow.text ? ` ${follow.text}` : "") };
+  }
   if (turn.topicChange || (activeBooking && !searchChange && !turn.searching)) return { state };
   if (!turn.searching && !searchChange && !turn.refused.length) return { state };
   const filters = businessFilters(state);

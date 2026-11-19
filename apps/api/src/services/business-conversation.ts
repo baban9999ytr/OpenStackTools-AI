@@ -62,7 +62,9 @@ export function extractBusinessTurn(text: string, requestId: string, prior?: unk
   const correction = /önceki|artık|yerine|değil|degil|instead|actually|previous|change/i.test(input);
   // Contradictory values in one message need clarification; don't guess which clause wins.
   for (const field of conflicts) delete updates[field];
-  return { updates, conflicts: [...conflicts], refused, correction,
+  const withdrawBudget = !updates.budget &&
+    /bütçe(?:mi|yi)?(?:\s+[^,.!? ]+){0,2}\s+(?:unut|boş ver)|(?:forget|drop|remove).{0,32}(?:budget|price limit)/i.test(input);
+  return { updates, withdrawBudget, conflicts: [...conflicts], refused, correction,
     searching: /ar[iı]yorum|looking for|search|kiral[iı]k|sat[iı]l[iı]k/i.test(input),
     handoff: /(?:insan|danışman|danisman|human|person|agent).{0,25}(?:konuş|görüş|aktar|speak|talk)|(?:speak|talk).{0,15}(?:human|person|agent)/i.test(input),
     injection: /ignore.{0,20}(?:rules|instructions)|sistem talimat|başka kiracı|another tenant|organizationId|run_arbitrary_code/i.test(input),
@@ -75,7 +77,13 @@ export function mergeBusinessState(raw: unknown, turn: ReturnType<typeof extract
   const refused = [...new Set([...state.refused, ...turn.refused])];
   const values = { ...state.values, ...turn.updates };
   for (const field of refused) if (field !== "phone") delete values[field];
-  return businessStateSchema.parse({ values, refused, asked: state.asked, viewingOffered: state.viewingOffered });
+  if (turn.withdrawBudget) {
+    delete values.budget;
+    delete values.currency;
+  }
+  const asked = turn.withdrawBudget && state.values.budget
+    ? state.asked.filter((field) => field !== "budget" && field !== "currency") : state.asked;
+  return businessStateSchema.parse({ values, refused, asked, viewingOffered: state.viewingOffered });
 }
 // Generic question planner: business adapters own labels and priorities, never shared orchestration.
 export function nextQuestions(state: BusinessState, priorities: readonly PreferenceField[], limit = 2) {
@@ -112,7 +120,7 @@ export function validateBusinessProposal(raw: unknown, text: string, requestId: 
   const parsed = proposals.safeParse(raw);
   if (!parsed.success) return null;
   const base = extractBusinessTurn(text, requestId);
-  if (base.injection || base.conflicts.length) return null;
+  if (base.injection || base.withdrawBudget || base.conflicts.length) return null;
   const updates: BusinessState["values"] = {};
   for (const item of parsed.data.fields) {
     if (!text.includes(item.evidence)) return null;

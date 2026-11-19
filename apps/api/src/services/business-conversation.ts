@@ -45,7 +45,13 @@ export function extractBusinessTurn(text: string, requestId: string, prior?: unk
     ["furnished", false, /eşyasız|esyasiz|unfurnished/i], ["furnished", true, /eşyalı|esyali|(?<!un)\bfurnished\b/i],
     ["balcony", true, /balkon.{0,8}(?:olsun|istiyorum)|want.{0,8}balcony/i],
   ];
-  for (const [field, value, regex] of mappings) { const m = regex.exec(input); if (m) put(field, value, m[0]); }
+  for (const [field, value, regex] of mappings) {
+    const match = regex.exec(input);
+    if (!match) continue;
+    const following = input.slice(match.index + match[0].length);
+    if (field === "listingType" && /^\s+(?:değil|degil)(?=\s|[,!.?]|$)/i.test(following)) continue;
+    put(field, value, match[0]);
+  }
   const refusePhone = /telefon.{0,25}(?:vermek|paylaşmak).{0,10}istemiyorum|(?:won't|do not want to|don't want to).{0,20}(?:phone|number)/i.test(input);
   const refused: BusinessState["refused"] = refusePhone ? ["phone"] : [];
   if (/bütçe.{0,25}(?:söylemek|paylaşmak).{0,10}istemiyorum|prefer not to share.{0,10}budget/i.test(input)) refused.push("budget");

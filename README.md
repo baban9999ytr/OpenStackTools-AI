@@ -6,9 +6,9 @@ This repository was created in a new directory from the product requirements. No
 
 ## Requirements
 
-- Node.js 22 LTS and npm
+- Node.js 24 LTS and npm (CI uses Node 24)
 - Docker Engine with Compose, or a MongoDB replica set (transactions are required for account creation)
-- An OpenAI API key and a model compatible with Chat Completions
+- A server-side OpenAI key with access to the chosen model for live replies. Local tests use synthetic replies.
 
 ## Start locally with Docker
 
@@ -52,6 +52,25 @@ For local testing, add the dashboard's exact origin (for example `http://localho
 
 The widget follows the embedding page's `lang` and `data-theme` where set. Optional `data-ost-lang="tr"` or `"en"` and `data-ost-theme="dark"` or `"light"` override those choices. The dashboard stores its language and theme locally. The versioned framework-independent brand contract is [`brand/tokens.json`](brand/tokens.json); run `npm run brand:generate` after changing it, then commit both generated stylesheets.
 
+## Assistant models and conversation strategy
+
+The dashboard groups assistants, conversations and staff takeover, business knowledge and listings, receptionist schedules and appointments, usage budgets, and Telegram connections by organization. Website chat and private Telegram chats use the same durable MongoDB request queue. Pending booking actions require matching visitor confirmation and a fresh conflict check before a slot is committed.
+
+| Mode | Standard model |
+| --- | --- |
+| Normal | GPT-6 Luna |
+| Powerful | GPT-6.1 Sol |
+| Very Powerful | GPT-6 Astra |
+| Automatic | GPT-6 Luna only, subject to policy and budget |
+
+New assistants currently default to an eligible preset. Saved Economical, Balanced (Terra), Advanced and custom configurations retain their compatibility. Product modes and saved preset/custom selections use Responses. Older assistants without a saved selection use the configured Chat Completions model and environment rates.
+
+Public documentation establishes an identifier and supported API capabilities. The application registry maps that identifier to supported settings and Standard prices. Platform and organization policy authorize its use, while the operator verification record attests to access in the actual provider project. A successful Responses call verifies invocation. Quality, latency and billed cost require a separate review with synthetic conversations.
+
+The queue intersects platform and organization reasoning ceilings, reserves worst-case spend against daily and monthly organization budgets before calling the provider, and reconciles reported tokens against the selected model's prices. Usage is an estimate in integer microdollars. Booking, idempotency and tenant permissions are enforced by the application.
+
+Enable **Conversation strategy → Real estate preferences and follow-up** to retain bounded preferences with evidence, ask for missing information and offer verified viewing slots. Listing searches use current tenant records. Furnishing, balcony and other unverified features require clarification or staff confirmation. Existing assistants use the reactive strategy until changed in settings.
+
 ## Configuration
 
 | Variable | Purpose |
@@ -59,13 +78,14 @@ The widget follows the embedding page's `lang` and `data-theme` where set. Optio
 | `MONGODB_URL` | MongoDB replica set URL |
 | `SESSION_SECRET` | Secret used to hash opaque session tokens; never expose to the browser |
 | `OPENAI_API_KEY` | Server-side provider key |
-| `OPENAI_MODEL` / `OPENAI_REASONING_EFFORT` | Chat Completions model and optional reasoning level; examples use `gpt-6-luna` with `none` |
-| `AI_ENABLED_MODELS` | Comma-separated operator allowlist for new assistant profiles; defaults to Luna only. Review project entitlement and current pricing before enabling Terra or Sol. Existing assistants keep their saved legacy configuration. |
+| `OPENAI_MODEL` / `OPENAI_REASONING_EFFORT` | Legacy Chat Completions fallback and optional reasoning effort when an assistant has no saved selection |
+| `AI_ENABLED_MODELS` | Operator allowlist for explicit selections. Defaults to Luna. Organizations may narrow it. |
+| `AI_VERIFIED_MODELS` | Empty by default. Add documented model IDs only after verifying project entitlement, Responses capabilities and applicable Standard pricing. Required for product modes in addition to both allowlists. |
 | `AI_MAX_REASONING_EFFORT` | Platform ceiling for tenant-selected reasoning; defaults to `medium`. Organization policy may set a stricter limit. |
 | `OPENAI_MAX_COMPLETION_TOKENS` | Maximum output including reasoning tokens (1–800) |
 | `APPOINTMENT_MORNING_WINDOW` / `APPOINTMENT_AFTERNOON_WINDOW` / `APPOINTMENT_EVENING_WINDOW` | Business-local, nonoverlapping 15-minute aligned periods for natural-language availability requests; defaults `09:00-12:00`, `12:00-17:00`, `17:00-21:00`. Organization and staff hours further restrict them. |
 | `DEFAULT_DAILY_BUDGET_USD` / `DEFAULT_MONTHLY_BUDGET_USD` | New-organization AI spend caps in USD |
-| `OPENAI_INPUT_USD_PER_MILLION_TOKENS` / `OPENAI_OUTPUT_USD_PER_MILLION_TOKENS` | Current model prices used for cost estimates and budget reservations |
+| `OPENAI_INPUT_USD_PER_MILLION_TOKENS` / `OPENAI_OUTPUT_USD_PER_MILLION_TOKENS` | Legacy fallback model prices. Explicit selections use the versioned model registry. |
 | `OPENAI_CACHED_INPUT_USD_PER_MILLION_TOKENS` / `OPENAI_CACHE_WRITE_USD_PER_MILLION_TOKENS` | Cache rates; if omitted, both use the ordinary input rate conservatively |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_FROM` | Account email; optional `SMTP_USER` and `SMTP_PASSWORD` |
 | `DASHBOARD_ORIGIN` | Exact dashboard browser origin (without `/app`) used for CORS, CSRF, and account links |
@@ -159,7 +179,9 @@ npm audit --audit-level=low
 
 The explicit live OpenAI and SMTP checks require operator-set opt-in flags and dedicated credentials; see [staging runbook](STAGING_RUNBOOK.md). The [backup restore runbook](BACKUP_RESTORE_RUNBOOK.md) includes a local isolated restore rehearsal. Do not treat local Mailpit or mocked AI checks as proof of external delivery or billing.
 
-The [AI evaluation guide](apps/api/evals/README.md) describes the 68 synthetic EN/TR scenarios, deterministic backend checks, and guarded model-only comparison mode. Deterministic model scores do not establish real model accuracy.
+The [testing guide](docs/VERIFICATION.md) explains the CI checks and fixture setup. The [evaluation guide](apps/api/evals/README.md) describes 128 offline scenarios and the separate three-candidate queue benchmark.
+
+For deployment, use HTTPS, private authenticated MongoDB with backups, exact allowed origins, a production mail provider and restricted credentials. Telegram needs a reachable HTTPS webhook and monitored workers. Subscription billing, production incident response and verified live-model quality remain release gaps. [Deployment guide](docs/DEPLOYMENT.md) · [Commercial readiness](SAAS_RELEASE_READINESS_REPORT.md)
 
 ## Documentation
 

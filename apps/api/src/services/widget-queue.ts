@@ -49,7 +49,7 @@ const LEASE_MS = 120_000;
 const MAX_ATTEMPTS = 2;
 export type ResponseLength = "short" | "balanced" | "detailed";
 export const replyLocale = (value: string, fallback: "en" | "tr"): "en" | "tr" =>
-  /^\s*(?:what|when|where|how|do you|is there|are there|can you|could you|please|i would|i want|let'?s|continue booking|back to)\b/i.test(value) ? "en"
+  /^\s*(?:what|when|where|how|do you|is there|are there|can you|could you|please|i would|i want|somewhere near|looking for|let'?s|continue booking|back to)\b/i.test(value) ? "en"
     : /[çğıöşüÇĞİÖŞÜ]|\b(?:merhaba|bana|nasıl|kiralık|satılık|daire|ilan|hizmet|ayrıntılı|ucuzdan|pahalıya|mahalle|bakabilir|mısın|istiyorum)\b/i.test(value) ? "tr"
     : /\b(?:hello|hi|what|please|listings|services|cheapest|appointment)\b/i.test(value) ? "en" : fallback;
 const safeSearchSummary = (raw: unknown) => {

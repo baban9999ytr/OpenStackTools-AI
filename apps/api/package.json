@@ -17,7 +17,8 @@
     "test:smtp:live": "tsx test/live-smtp.ts",
     "test:backup:restore": "tsx test/backup-restore.ts",
     "eval:deterministic": "tsx evals/deterministic.ts",
-    "eval:live": "tsx evals/live.ts",
+    "eval:live": "tsx evals/benchmark.ts --live",
+    "eval:benchmark": "tsx evals/benchmark.ts",
     "eval:typecheck": "tsc -p evals/tsconfig.json"
   },
   "dependencies": {

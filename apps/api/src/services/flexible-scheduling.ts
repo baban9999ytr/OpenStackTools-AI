@@ -7,17 +7,20 @@ export const flexibleDatePlan = (text: string, zone: string, at: Date, priorDate
   const add = (n: number) => { const d = new Date(`${local.date}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
   const any = /(?:gün|gun).{0,15}(?:saat|zaman).{0,15}fark etmez|any (?:day|time)|whenever/i.test(text);
   const week = /bu hafta.{0,25}herhangi|any day this week/i.test(text);
-  const excludeTomorrow = /yarın olmaz.{0,30}sonraki iki gün|not tomorrow.{0,30}(?:following|next) two days/i.test(text);
+  const excludeTomorrow = /yarın (?:olmaz|gelemem|gelemiyorum).{0,30}sonraki iki gün|not tomorrow.{0,30}(?:following|next) two days/i.test(text);
   const notEarly = /sabah erken olmasın|not early (?:in the )?morning/i.test(text);
   const window = requestedAppointmentWindow(text, zone, at);
   const periodOnly = /(?:öğleden sonra|afternoon).{0,25}(?:herhangi|any|olur)/i.test(text);
   if (!any && !week && !excludeTomorrow && !notEarly && !periodOnly && !window.period) return null;
   if (/(?:sabah|morning).{0,30}(?:yalnızca|only).{0,30}(?:öğleden sonra|afternoon)|(?:öğleden sonra|afternoon).{0,30}(?:yalnızca|only).{0,30}(?:sabah|morning)/i.test(text))
     return { dates: [], startMinute: 0, endMinute: 1440, needsClarification: true };
-  let dates = excludeTomorrow ? [add(2), add(3)] : requestedAppointmentDates(text, zone, at);
+  const explicitDates = requestedAppointmentDates(text, zone, at);
+  let dates = excludeTomorrow ? [add(2), add(3)] : explicitDates;
   if (!dates.length && priorDate && !any && !week) dates = [priorDate];
   if (!dates.length) dates = Array.from({ length: week ? 7 - ((local.day + 6) % 7) : 7 }, (_, i) => add(i));
-  dates = dates.filter((date) => date >= local.date && date <= add(6)).slice(0, 7);
+  // A named weekday can resolve to exactly one week ahead when today has that weekday.
+  const horizon = add(explicitDates.length ? 7 : 6);
+  dates = dates.filter((date) => date >= local.date && date <= horizon).slice(0, 7);
   // “Not early” has no universal numeric meaning. Ask rather than inventing a preference.
   return { dates, startMinute: window.startMinute ?? 0, endMinute: window.endMinute ?? 1440,
     needsClarification: notEarly };

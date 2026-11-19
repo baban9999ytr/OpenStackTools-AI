@@ -282,3 +282,37 @@ All four product modes, project-verification gates, Luna-only Automatic routing,
 The implementation handles an intentionally bounded phrase set. Ambiguous dates/references, unsupported spellings, arbitrary multi-location changes or model proposals without verifiable evidence may need clarification or human help. The strategy does not certify unmodeled furnishing/feature data, perform currency conversion, verify personal identity or create CRM records. Optional viewing invitation quality and broad free-text naturalness still require human-reviewed live evaluation. Existing assistants must explicitly enable the new strategy; no silent behavior migration occurred.
 
 Phase 2B's local vertical slice and required evaluation count are implemented and verified. Live model tool selection, naturalness, latency and entitlement remain unverified. Project ASTRA and a real-business pilot are **not production-ready on mock evidence alone**. Authorized synthetic live evaluation remains a separate release gate. No deployment, commit, push, production restart, paid API call or real customer-data modification occurred.
+
+## Phase 2C — CI, evaluation and commercial release preparation (2026-11-19)
+
+The working tree was clean at the start on commit `80f4dfa`. Git remote HEAD confirmed `master`. The repository had no Actions workflow. The legacy live evaluation used Chat Completions and rejected Sol and Astra. The README omitted the current product mode and strategy details. The review traced the website and Telegram paths to the shared queue, the assistant model resolver and budget accounting, the staff authorization boundaries, the MongoDB fixtures and browser test configuration.
+
+### Changes and files
+
+- `.github/workflows/ci.yml` adds push and PR checks for `master` and manual dispatch. The Ubuntu 24.04 job uses pinned checkout and setup-node actions, Node 24, `npm ci`, npm cache, read-only contents permission, no stored checkout credentials, a 25-minute deadline and cancellation of superseded runs. Synthetic replica sets are pinned to MongoDB 8.0.12. Playwright installs Chromium only. The workflow uses ordinary pull-request events and has no production secrets or deployment actions.
+- `apps/web/playwright.config.ts` selects Playwright-managed Chromium in CI and starts a fresh Vite server. Local system and explicit executable overrides remain available.
+- `apps/api/evals/benchmark.ts` and `benchmark-cases.ts` add versioned durable-queue comparison, rule checks, usage and report output. `apps/api/package.json` wires the offline benchmark and opt-in Responses benchmark. The retired direct Chat Completions CLI was removed from `apps/api/evals/live.ts`.
+- `apps/api/src/services/business-conversation.ts` handles explicitly negated rental/sale types. `widget-queue.ts` recognizes common explicit English starts with Turkish place names. `flexible-scheduling.ts` handles explicit next-week dates and excludes a declined tomorrow from the following two days.
+- `README.md`, `docs/ARCHITECTURE.md`, `docs/VERIFICATION.md` and `apps/api/evals/README.md` describe the implemented channels, model activation, budgets, synthetic test commands and release prerequisites.
+- This report, `ASTRA_PHASE_2C_EVALUATION_REPORT.md` and `SAAS_RELEASE_READINESS_REPORT.md` record verification, limitations and the Phase 3 plan.
+
+### Safety and verification
+
+The queue test and benchmark changes keep tenant and model authorization in the application. The benchmark uses production reservation and reconciliation paths in isolated MongoDB, restricts all transactions to synthetic state, checks for forbidden actions and never sends mail or Telegram delivery. Regression evidence for confirmations, expired and duplicate proposals, model restrictions, missing prices, exhausted budgets, provider failures and telemetry remains in the existing test suite. The old direct live runner lacked tenant budget authority and Responses support. Its replacement requires explicit opt-ins, reviewed registry prices, separate credentials, verified candidate IDs and request/spend bounds. CI cannot activate live mode.
+
+Local runs used Node 24. The first new evaluator typecheck found widened listing fixture enum types, corrected with literal types. The first comparison exposed the locale defect and explicit rent/sale correction gap. The first full API run failed the Thursday scheduling regression, corrected by allowing explicit dates exactly seven days out while retaining the bounded seven-date search. No test assertions were relaxed.
+
+| Check | Outcome |
+| --- | --- |
+| Locked npm install | Passed |
+| API | 103 passed, zero skipped |
+| Browser | 17 passed with system Chromium and 17 passed with Playwright-managed Chromium under `CI=true` |
+| Deterministic evaluation | 128 scenarios, 64 backend passes, four intentional no-action skips |
+| Queue benchmark | 39 simulated turns across three candidate configurations, zero failures |
+| Application and evaluation typechecks, production build, brand check | Passed |
+| Dependency audit | Zero reported vulnerabilities |
+| Actionlint and whitespace check | Passed |
+| GitHub-hosted workflow | Local syntax and constituent commands verified. Hosted execution pending. |
+| Live model evaluation | Gate rejection checked locally. Provider execution and access pending. |
+
+Public SaaS and a real-customer pilot remain gated on hosted CI, authorized live-model and channel checks, managed operations, privacy rehearsals and support ownership. Prioritize verified listing attributes, structured contact consent and staff notifications before broader self-service and billing. [Evaluation evidence](ASTRA_PHASE_2C_EVALUATION_REPORT.md) · [Phase 3 readiness plan](SAAS_RELEASE_READINESS_REPORT.md)

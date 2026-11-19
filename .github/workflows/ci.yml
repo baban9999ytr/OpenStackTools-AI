@@ -1,0 +1,65 @@
+name: CI
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CI: "true"
+      MONGOMS_VERSION: "8.0.12"
+      MONGOMS_MD5_CHECK: "true"
+      MONGOMS_DISABLE_POSTINSTALL: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Check committed whitespace
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            git diff --check "$BASE_SHA"...HEAD
+          else
+            git show --format= --check HEAD
+          fi
+      - name: Typecheck application and evaluations
+        run: |
+          npm run typecheck
+          npm run eval:typecheck -w apps/api
+      - name: Brand and production build
+        run: |
+          npm run brand:check
+          npm run build
+      - name: API tests with synthetic replica sets
+        run: npm test
+      - name: Offline evaluations and comparison smoke
+        run: |
+          npm run eval:deterministic -w apps/api
+          npm run eval:benchmark -w apps/api
+      - name: Install Chromium
+        run: npm exec --workspace apps/web -- playwright install --with-deps chromium
+      - name: Browser tests
+        run: npm run test:browser -w apps/web
+      - name: Dependency audit
+        if: ${{ !cancelled() }}
+        run: npm audit --audit-level=low --json

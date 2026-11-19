@@ -15,7 +15,7 @@ cleanup() {
     const marker = process.env.MARKER;
     const source = db.getSiblingDB("ost_ai_local");
     for (const name of ["messages", "conversations", "assistants", "organizations", "users", "memberships",
-      "staffavailabilities", "customers", "appointments", "appointmentslots", "agentactions", "businessknowledges", "listings"])
+      "staffavailabilities", "customers", "appointments", "appointmentslots", "agentactions", "businessknowledges", "listings", "auditevents"])
       source.getCollection(name).deleteMany({ localRestoreMarker: marker });
     db.getSiblingDB("ost_ai_restore_" + marker).dropDatabase();
   ' >/dev/null 2>&1 || cleanup_status=1
@@ -32,7 +32,8 @@ trap cleanup EXIT
     const owner = source.users.insertOne({email: "restore-" + marker + name.replace(" ", "") + "@example.test", name: "Synthetic owner", passwordHash: "test-only", localRestoreMarker: marker});
     source.memberships.insertOne({organizationId: org.insertedId, userId: owner.insertedId, role: "owner", localRestoreMarker: marker});
     const assistant = source.assistants.insertOne({organizationId: org.insertedId, localRestoreMarker: marker, name: name + " assistant", instructions: "Synthetic restore check", publicKey: "ost_restore_" + marker + name.replace(" ", ""), allowedOrigins: [], active: true});
-    const conversation = source.conversations.insertOne({organizationId: org.insertedId, assistantId: assistant.insertedId, localRestoreMarker: marker, visitorId: "restore_" + marker, status: "bot"});
+    const conversation = source.conversations.insertOne({organizationId: org.insertedId, assistantId: assistant.insertedId, localRestoreMarker: marker, visitorId: "restore_" + marker, status: "bot", workflow: {business: {alternatives: {location: ["Görükle", "Özlüce"]}}}});
+    source.auditevents.insertOne({organizationId: org.insertedId, actorId: owner.insertedId, action: "conversation.handoff", target: conversation.insertedId.toString(), result: 200, localRestoreMarker: marker});
     source.messages.insertOne({organizationId: org.insertedId, conversationId: conversation.insertedId, localRestoreMarker: marker, role: "customer", text: "Synthetic restore check"});
     source.staffavailabilities.insertOne({organizationId: org.insertedId, staffId: owner.insertedId, windows: [], localRestoreMarker: marker});
     const customer = source.customers.insertOne({organizationId: org.insertedId, conversationId: conversation.insertedId, visitorId: "restore_" + marker,
@@ -51,7 +52,7 @@ trap cleanup EXIT
     source.businessknowledges.insertOne({organizationId: org.insertedId, profile: "Synthetic office", localRestoreMarker: marker});
     source.listings.insertOne({organizationId: org.insertedId, title: "Synthetic flat", description: "Restore check",
       location: "Istanbul", price: 100000, currency: "USD", propertyType: "apartment", areaSqm: 90,
-      availability: "available", localRestoreMarker: marker});
+      availability: "available", facts: {maintenanceFee: 0, furnished: false}, localRestoreMarker: marker});
   }
 ' >/dev/null
 
@@ -61,10 +62,20 @@ trap cleanup EXIT
   const marker = process.env.MARKER;
   const restored = db.getSiblingDB("ost_ai_restore_" + marker);
   for (const name of ["organizations", "users", "memberships", "assistants", "conversations", "messages",
-    "staffavailabilities", "customers", "appointments", "appointmentslots", "agentactions", "businessknowledges", "listings"])
+    "staffavailabilities", "customers", "appointments", "appointmentslots", "agentactions", "businessknowledges", "listings", "auditevents"])
     if (restored.getCollection(name).countDocuments({localRestoreMarker: marker}) !== 2) throw Error("Restored tenant count mismatch: " + name);
+  if (restored.listings.countDocuments({localRestoreMarker: marker, "facts.maintenanceFee": 0,
+      "facts.furnished": false, "facts.deposit": {$exists: false}}) !== 2) throw Error("Restored listing facts mismatch");
+  for (const org of restored.organizations.find({localRestoreMarker: marker}).toArray()) {
+    const scope = {organizationId: org._id, localRestoreMarker: marker};
+    const conversation = restored.conversations.findOne(scope);
+    if (restored.conversations.countDocuments({...scope, "workflow.business.alternatives.location": ["Görükle", "Özlüce"]}) !== 1 ||
+        restored.appointments.countDocuments({...scope, conversationId: conversation._id}) !== 1 ||
+        restored.auditevents.countDocuments({...scope, target: conversation._id.toString()}) !== 1)
+      throw Error("Restored tenant boundaries, preferences or audit mismatch");
+  }
   for (const [name, index] of [["assistants", "publicKey_1"], ["appointmentslots", "organizationId_1_staffId_1_startAt_1"],
-    ["businessknowledges", "organizationId_1"]])
+    ["businessknowledges", "organizationId_1"], ["agentactions", "organizationId_1_idempotencyKey_1"]])
     if (!restored.getCollection(name).getIndexes().some(item => item.name === index && item.unique)) throw Error("Unique index missing: " + name + "." + index);
   print("Authenticated local archive restored into an isolated database; two synthetic tenants, Phase 5/6 records and unique indexes verified.");
 '

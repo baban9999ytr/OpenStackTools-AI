@@ -112,6 +112,8 @@ const conversationSchema = new Schema(
     workflow: {
       business: { type: Schema.Types.Mixed },
       offeredSlots: { type: [{ startAt: String, staffId: String, durationMinutes: Number }], default: undefined },
+      propertyFocusId: { type: Schema.Types.ObjectId, ref: "Listing" },
+      displayedListingIds: { type: [Schema.Types.ObjectId], default: undefined },
       selectedListingId: { type: Schema.Types.ObjectId, ref: "Listing" },
       preferredDate: { type: String },
       preferredMinute: { type: Number },
@@ -551,6 +553,11 @@ const listingSchema = new Schema({
   propertyType: { type: String, enum: ["apartment", "house", "land", "commercial"], required: true },
   rooms: { type: Number, min: 0, max: 50 }, areaSqm: { type: Number, required: true, min: 1 },
   availability: { type: String, enum: ["available", "reserved", "sold"], default: "available" },
+  facts: {
+    maintenanceFee: { type: Number, min: 0, max: 1_000_000_000 },
+    deposit: { type: Number, min: 0, max: 1_000_000_000 },
+    furnished: { type: Boolean },
+  },
   publicUrl: { type: String }, archivedAt: { type: Date },
 }, options);
 listingSchema.index({ organizationId: 1, archivedAt: 1, availability: 1, price: 1 });

@@ -53,10 +53,16 @@ router.post("/:organizationId/listings", write, validate(listingInput), async (r
   const listing = await Listing.create({ ...req.body, organizationId: res.locals.organizationId });
   res.status(201).json({ listing });
 });
-router.patch("/:organizationId/listings/:listingId", write, validate(listingInput.partial()), async (req, res) => {
+const listingPatch = listingInput.partial().extend({ rooms: listingInput.shape.rooms.nullable(),
+  publicUrl: listingInput.shape.publicUrl.nullable() });
+router.patch("/:organizationId/listings/:listingId", write, validate(listingPatch), async (req, res) => {
   if (!validId(req.params.listingId)) { res.status(400).json({ error: "Invalid listing" }); return; }
+  const patch = req.body as z.infer<typeof listingPatch>;
+  const { rooms, publicUrl, ...fields } = patch;
   const listing = await Listing.findOneAndUpdate({ _id: req.params.listingId, organizationId: res.locals.organizationId, archivedAt: { $exists: false } },
-    { $set: req.body }, { returnDocument: "after", runValidators: true });
+    { $set: { ...fields, ...(rooms != null ? { rooms } : {}), ...(publicUrl != null ? { publicUrl } : {}) },
+      $unset: { ...(rooms === null ? { rooms: 1 } : {}), ...(publicUrl === null ? { publicUrl: 1 } : {}) } },
+    { returnDocument: "after", runValidators: true });
   if (!listing) { res.status(404).json({ error: "Listing unavailable" }); return; }
   res.json({ listing });
 });

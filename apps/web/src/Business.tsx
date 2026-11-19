@@ -5,14 +5,15 @@ import { usePreferences } from "./preferences";
 type Knowledge = { profile: string; services: Array<{ name: string; description: string; price: string }>;
   faqs: Array<{ question: string; answer: string }>; policies: Array<{ title: string; text: string }>;
   contact: { email: string; phone: string; address: string; website: string }; facts: Array<{ label: string; value: string }> };
+type ListingFacts = { maintenanceFee?: number; deposit?: number; furnished?: boolean };
 type Listing = { _id: string; title: string; description: string; location: string; price: number; currency: string;
-  propertyType: string; listingType?: string; rooms?: number; areaSqm: number; availability: string; publicUrl?: string; updatedAt: string };
+  propertyType: string; listingType?: string; rooms?: number; areaSqm: number; availability: string; publicUrl?: string; updatedAt: string; facts?: ListingFacts };
 type Lead = { _id: string; name: string; contact: string; request: string; leadStatus: string; requirements?: string;
   budgetMin?: number; budgetMax?: number; preferredLocations?: string[]; propertyTypes?: string[]; minRooms?: number;
   minAreaSqm?: number; assignedTo?: string | null; notes?: string; followUpAt?: string | null; conversationId?: string };
 type Summary = { conversationId: string; status: string; updatedAt: string; recent: Array<{ role: string; text: string }> };
 const emptyKnowledge: Knowledge = { profile: "", services: [], faqs: [], policies: [], contact: { email: "", phone: "", address: "", website: "" }, facts: [] };
-const emptyListing = { title: "", description: "", location: "", price: 0, currency: "TRY", listingType: "", propertyType: "apartment", rooms: 0, areaSqm: 1, availability: "available", publicUrl: "" };
+const emptyListing = { title: "", description: "", location: "", price: "", currency: "TRY", listingType: "", propertyType: "apartment", rooms: "", areaSqm: "", availability: "available", publicUrl: "", maintenanceFee: "", deposit: "", furnished: "" };
 const errorText = (error: unknown) => error instanceof Error ? error.message : "Something went wrong";
 const localInput = (iso?: string | null) => iso ? new Date(new Date(iso).getTime() - new Date(iso).getTimezoneOffset() * 60_000).toISOString().slice(0, 16) : "";
 
@@ -83,7 +84,15 @@ export function Business({ organizationId, role }: { organizationId: string; rol
   async function saveListing(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
     try {
-      const body = { ...listing, ...(listing.publicUrl ? {} : { publicUrl: undefined }), ...(listing.listingType ? {} : { listingType: undefined }) };
+      const { maintenanceFee, deposit, furnished, rooms, publicUrl, price, areaSqm, ...draft } = listing;
+      const facts: ListingFacts = {
+        ...(maintenanceFee !== "" ? { maintenanceFee: Number(maintenanceFee) } : {}),
+        ...(deposit !== "" ? { deposit: Number(deposit) } : {}),
+        ...(furnished !== "" ? { furnished: furnished === "true" } : {}),
+      };
+      const body = { ...draft, facts, price: price === "" ? undefined : Number(price), areaSqm: areaSqm === "" ? undefined : Number(areaSqm),
+        rooms: rooms === "" ? (editing ? null : undefined) : Number(rooms),
+        publicUrl: publicUrl || (editing ? null : undefined) };
       await api(`${base}/listings${editing ? `/${editing}` : ""}`, { method: editing ? "PATCH" : "POST", body: JSON.stringify(body) });
       setNotice(t("Listing saved.")); setListing(emptyListing); setEditing(""); await load();
     } catch (caught) { setError(t(errorText(caught))); } finally { setBusy(false); }
@@ -114,27 +123,43 @@ export function Business({ organizationId, role }: { organizationId: string; rol
       </form>
     </section>
     <section className="card"><h2>{t("Property listings")}</h2>
+      <p className="muted">{t("Only current, available listings appear in recommendations.")}</p>
       <form onSubmit={(event) => { event.preventDefault(); void load(); }}><label>{t("Search location")}<input value={filter} maxLength={100} onChange={(event) => setFilter(event.target.value)} /></label><button className="secondary">{t("Search")}</button></form>
       {listings.length === 0 && <p className="muted">{t("No matching listings.")}</p>}
       {listings.map((item) => <div className="list-item" key={item._id}><strong>{item.title}</strong><span>{item.location} · {item.price} {item.currency} · {item.listingType ? t(item.listingType) : t("Unspecified listing type")} · {t(item.availability)}</span>
         <small>{t("Updated")}: {new Date(item.updatedAt).toLocaleDateString(locale)}</small>
         {canWrite && <div className="handoff-actions"><button type="button" className="secondary" onClick={() => { setEditing(item._id); setListing({ title: item.title, description: item.description, location: item.location,
-          price: item.price, currency: item.currency, listingType: item.listingType ?? "", propertyType: item.propertyType, rooms: item.rooms ?? 0,
-          areaSqm: item.areaSqm, availability: item.availability, publicUrl: item.publicUrl ?? "" }); }}>{t("Edit")}</button>
+          price: String(item.price), currency: item.currency, listingType: item.listingType ?? "", propertyType: item.propertyType, rooms: String(item.rooms ?? ""),
+          areaSqm: String(item.areaSqm), availability: item.availability, publicUrl: item.publicUrl ?? "",
+          maintenanceFee: String(item.facts?.maintenanceFee ?? ""), deposit: String(item.facts?.deposit ?? ""),
+          furnished: String(item.facts?.furnished ?? "") }); }}>{t("Edit")}</button>
           <button type="button" className="secondary" disabled={busy} onClick={() => void archive(item._id)}>{t("Archive")}</button></div>}
       </div>)}
       {canWrite && <form onSubmit={saveListing}><h3>{t(editing ? "Edit listing" : "Add listing")}</h3>
         <label>{t("Title")}<input required maxLength={150} value={listing.title} onChange={(event) => setListing({ ...listing, title: event.target.value })} /></label>
         <label>{t("Description")}<textarea required maxLength={2000} value={listing.description} onChange={(event) => setListing({ ...listing, description: event.target.value })} /></label>
         <div className="business-pair"><label>{t("Location")}<input required maxLength={150} value={listing.location} onChange={(event) => setListing({ ...listing, location: event.target.value })} /></label>
-          <label>{t("Price")}<input required type="number" min="0" value={listing.price} onChange={(event) => setListing({ ...listing, price: Number(event.target.value) })} /></label>
-          <label>{t("Currency")}<select value={listing.currency} onChange={(event) => setListing({ ...listing, currency: event.target.value })}>{["TRY", "USD", "EUR", "GBP"].map((value) => <option key={value}>{value}</option>)}</select></label>
+          <label>{t("Price")}<input required type="number" min="0" max="1000000000" step="any" value={listing.price} onChange={(event) => setListing({ ...listing, price: event.target.value })} /></label>
+          <label>{t("Currency")}<select value={listing.currency} onChange={(event) => setListing({ ...listing, currency: event.target.value, maintenanceFee: "", deposit: "" })}>{["TRY", "USD", "EUR", "GBP"].map((value) => <option key={value}>{value}</option>)}</select></label>
           <label>{t("Listing type")}<select required value={listing.listingType} onChange={(event) => setListing({ ...listing, listingType: event.target.value })}><option value="">{t("Select listing type")}</option><option value="rent">{t("rent")}</option><option value="sale">{t("sale")}</option></select></label>
           <label>{t("Property type")}<select value={listing.propertyType} onChange={(event) => setListing({ ...listing, propertyType: event.target.value })}>{["apartment", "house", "land", "commercial"].map((value) => <option key={value} value={value}>{t(value)}</option>)}</select></label>
-          <label>{t("Rooms")}<input type="number" min="0" max="50" value={listing.rooms} onChange={(event) => setListing({ ...listing, rooms: Number(event.target.value) })} /><small>{t("For 3+1, enter 3.")}</small></label>
-          <label>{t("Area (m²)")}<input type="number" min="1" value={listing.areaSqm} onChange={(event) => setListing({ ...listing, areaSqm: Number(event.target.value) })} /></label>
+          <label>{t("Rooms")}<input type="number" min="0" max="50" value={listing.rooms} onChange={(event) => setListing({ ...listing, rooms: event.target.value })} /><small>{t("For 3+1, enter 3.")}</small></label>
+          <label>{t("Area (m²)")}<input required type="number" min="1" max="1000000" step="any" value={listing.areaSqm} onChange={(event) => setListing({ ...listing, areaSqm: event.target.value })} /></label>
           <label>{t("Availability")}<select value={listing.availability} onChange={(event) => setListing({ ...listing, availability: event.target.value })}>{["available", "reserved", "sold"].map((value) => <option key={value} value={value}>{t(value)}</option>)}</select></label>
           <label>{t("Public URL")}<input type="url" maxLength={500} value={listing.publicUrl} onChange={(event) => setListing({ ...listing, publicUrl: event.target.value })} /></label></div>
+        <fieldset className="business-rows">
+          <legend>{t("Verified listing facts")}</legend>
+          <p className="muted">{t("Enter only verified values. Leave unknown amounts blank and use the listing currency.")}</p>
+          <div className="business-pair">
+            <label>{t("Maintenance fee")} ({listing.currency})<input type="number" min="0" max="1000000000" step="any" value={listing.maintenanceFee}
+              onChange={(event) => setListing({ ...listing, maintenanceFee: event.target.value })} /></label>
+            <label>{t("Deposit")} ({listing.currency})<input type="number" min="0" max="1000000000" step="any" value={listing.deposit}
+              onChange={(event) => setListing({ ...listing, deposit: event.target.value })} /></label>
+            <label>{t("Furnishing status")}<select value={listing.furnished} onChange={(event) => setListing({ ...listing, furnished: event.target.value })}>
+              <option value="">{t("Unknown")}</option><option value="true">{t("Furnished")}</option><option value="false">{t("Unfurnished")}</option>
+            </select></label>
+          </div>
+        </fieldset>
         <button disabled={busy}>{t("Save listing")}</button>{editing && <button type="button" className="secondary" onClick={() => { setEditing(""); setListing(emptyListing); }}>{t("Cancel editing")}</button>}
       </form>}
     </section>

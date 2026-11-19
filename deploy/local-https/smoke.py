@@ -46,6 +46,21 @@ class Client:
         return response.status, result, response.headers
 
 
+def verify_health_boundary():
+    for path in ("/health/live", "/app"):
+        with urllib.request.urlopen(BASE + path, context=TLS, timeout=10) as res:
+            assert res.status == 200
+            assert res.headers.get_all("Strict-Transport-Security") == ["max-age=300"], path
+    try:
+        urllib.request.urlopen(BASE + "/health/ready", context=TLS, timeout=10)
+    except urllib.error.HTTPError as error:
+        assert error.code == 404
+    else:
+        raise AssertionError("Readiness is reachable at the public edge")
+
+
+verify_health_boundary()
+
 def mail_token(email, purpose):
     subject = {"verify": "Verify your email", "reset": "Reset your password", "invite": "Accept your invitation"}[purpose]
     for _ in range(30):

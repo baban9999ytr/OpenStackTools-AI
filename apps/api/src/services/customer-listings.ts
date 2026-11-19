@@ -12,7 +12,7 @@ export const listingFollowUpIntent = (query: string, hasPrior: boolean): Listing
   if (/hizmet|service|iletişim|contact|çalışma saat|opening hour|randevu|appointment|insan|human/i.test(query)) return "topic";
   if (/farklı.{0,25}mahalle|başka.{0,25}mahalle|different neighborhood|other neighborhood/i.test(query)) return "broaden";
   if (/\b(?:buy|purchase|rent|rental)\b|satın al|satılık|kiralık|bütçe|budget|\bunder\b|altında|\b\d+\s*\+\s*1\b|oda sayısı|room count|yeni arama|new search/i.test(query)) return "search";
-  if (/\b(?:balcony|balconies|parking|elevator|dues)\b|balkon|otopark|asansör|aidat|maintenance fee/i.test(query)) return "attribute";
+  if (/\b(?:balcony|balconies|parking|elevator|dues)\b|balkon|otopark|asansör|aidat|maintenance fee|depozito|\bdeposit\b/i.test(query)) return "attribute";
   if (/öner|tavsiye|hangisini seç|hangisi daha iyi|recommend|which one|compare|karşılaştır/i.test(query)) return "recommend";
   if (/ucuzdan pahalıya|pahalıdan ucuza|cheapest first|lowest to highest|highest to lowest/i.test(query)) return "sort";
   if (/ucuz olan|pahalı olan|cheaper one|more expensive one|\b(?:it|that one|those apartments)\b|onun|o daire|daha ucuz|daha pahalı|o ilanlar|önceki ilan|back to/i.test(query)) return "reference";
@@ -39,8 +39,8 @@ export const formatListingReply = (raw: VerifiedListing[], options: ListingReply
   const ascending = /en ucuzdan pahalıya|ucuzdan pahalıya|lowest to highest|cheapest first|price ascending/i.test(query);
   const descending = /en pahalıdan ucuza|pahalıdan ucuza|highest to lowest|most expensive first|price descending/i.test(query);
   if (ascending || descending) listings.sort((a, b) => (a.price - b.price) * (descending ? -1 : 1));
-  const ordinal = /(?:[iİ]lk|birinci|first)\s+(?:ilan|listing|property)/i.test(query) ? 0
-    : /(?:[iİ]kinci|second)\s+(?:ilan|listing|property)/i.test(query) ? 1 : -1;
+  const ordinal = /(?:ilkini|(?:[iİ]lk|birinci|first)\s+(?:ilan|listing|property))/i.test(query) ? 0
+    : /(?:ikincisini|(?:[iİ]kinci|second)\s+(?:ilan|listing|property))/i.test(query) ? 1 : -1;
   const namedIndex = options.reused ? listings.findIndex((item) => {
     const name = item.title.replace(/^DEMO\s*[—-]\s*/i, "").toLocaleLowerCase("tr");
     return name.length >= 8 && query.toLocaleLowerCase("tr").includes(name);
@@ -52,16 +52,22 @@ export const formatListingReply = (raw: VerifiedListing[], options: ListingReply
     ? -1 : listings.findIndex((item) => item.price === extreme);
   const chosenIndex = namedIndex >= 0 ? namedIndex : ordinal >= 0 ? ordinal : priceIndex;
   const selected = chosenIndex >= 0 && options.reused ? listings.slice(chosenIndex, chosenIndex + 1) : listings;
-  const attribute = /aidat|maintenance fee|\bdues\b/i.test(query) ? { en: "maintenance fee", tr: "aidat" }
+  const attribute = /depozito|\bdeposit\b/i.test(query) ? { en: "deposit", tr: "depozito" }
+    : /aidat|maintenance fee|\bdues\b/i.test(query) ? { en: "maintenance fee", tr: "aidat" }
     : /\b(?:balcony|balconies)\b|balkon/i.test(query) ? { en: "balcony", tr: "balkon" }
     : /\bparking\b|otopark/i.test(query) ? { en: "parking", tr: "otopark" }
       : /\belevator\b|asansör/i.test(query) ? { en: "elevator", tr: "asansör" } : null;
-  if (attribute && options.reused && selected.length !== 1) return tr
+  if (attribute && options.reused && selected.length !== 1) {
+    if (["maintenance fee", "deposit"].includes(attribute.en) && /tahmin|uydur|guess|make up/i.test(query))
+      return tr ? "Doğrulanmamış bir tutarı tahmin edemem. Hangi ilanı sorduğunuzu belirtir misiniz?"
+        : "I can't guess an unverified amount. Which listing do you mean?";
+    return tr
     ? "Hangi ilanı kastettiğinizi netleştirir misiniz? Özelliği kayıtlı bilgilerden kontrol edebilirim."
     : "Which listing do you mean? I can check its stored details.";
+  }
   if (attribute && selected.length === 1 && options.reused) {
     const item = selected[0]!;
-    const confirmed = attribute.en !== "maintenance fee" && new RegExp(`${attribute.en}|${attribute.tr}`, "i").test(item.description ?? "");
+    const confirmed = !["maintenance fee", "deposit"].includes(attribute.en) && new RegExp(`${attribute.en}|${attribute.tr}`, "i").test(item.description ?? "");
     return confirmed ? tr ? `${item.title} ilanının açıklamasında ${attribute.tr} belirtiliyor. Ayrıntıları danışmanla doğrulamak ister misiniz?`
       : `${item.title} mentions ${attribute.en} in its stored description. Would you like staff to confirm the details?`
       : tr ? `${item.title} için ${attribute.tr} bilgisi kayıtlı ilanda doğrulanmamış. İsterseniz danışmana sorabilirim.`
@@ -101,4 +107,28 @@ export const formatListingReply = (raw: VerifiedListing[], options: ListingReply
     return `${index + 1}. ${item.title}: ${details} — ${priceText(item, locale)}.${link}`;
   });
   return `${introduction}\n${lines.join("\n")}${shown.length < listings.length ? tr ? "\nBaşka seçenekler de var; isterseniz devamını paylaşabilirim." : "\nMore matches are available; ask to see the rest." : ""}`;
+};
+
+// Resolve ordinals against what the customer actually saw, rather than database order.
+export const displayedListingIds = (text: string, listings: VerifiedListing[]) => {
+  const ids: string[] = [];
+  for (const line of text.split("\n")) {
+    const match = /^\s*\d+\. (.+)$/.exec(line);
+    if (!match) continue;
+    const matching = listings.filter((listing) => match[1]!.startsWith(`${listing.title}:`));
+    if (matching.length !== 1 || !/^[a-f\d]{24}$/i.test(String(matching[0]!._id))) return [];
+    ids.push(String(matching[0]!._id));
+  }
+  if (ids.length) return [...new Map(ids.map((id) => [id, id])).values()].slice(0, 10);
+  // Synthesis can present a grounded list in prose. Keep only uniquely identified records.
+  const mentions = listings.map((item) => {
+    const title = text.indexOf(item.title);
+    const tr = priceText(item, "tr");
+    const en = priceText(item, "en");
+    const uniquePrice = listings.filter((entry) => entry.price === item.price && entry.currency === item.currency).length === 1;
+    const price = uniquePrice ? Math.max(text.indexOf(tr), text.indexOf(en)) : -1;
+    return { index: title >= 0 ? title : price, id: String(item._id) };
+  });
+  return mentions.filter(({ index, id }) => index >= 0 && /^[a-f\d]{24}$/i.test(id))
+    .sort((a, b) => a.index - b.index).slice(0, 10).map(({ id }) => id);
 };

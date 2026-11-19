@@ -10,8 +10,18 @@ function deny(message) {
 }
 
 const args = process.argv.slice(2);
-if (args.length !== 1 || !["--preflight", "--execute"].includes(args[0]))
+const intent = args[1] === "--suite=luna-structured-intent";
+const phase2f = args[1] === "--suite=luna-quality";
+const singleCall = args[1] === "--suite=phase2g-single-call";
+const phase2i = args[1] === "--suite=phase2i-rc";
+const arm = args[1] === "--suite=luna-contract-a" ? "A" : args[1] === "--suite=luna-contract-b" ? "B" : undefined;
+const phase2g = !!arm || phase2i || args[1] === "--suite=phase2g-live";
+if ((args.length !== 1 && !(args.length === 2 && (intent || phase2f || phase2g || singleCall))) ||
+    !["--preflight", "--execute"].includes(args[0]))
   deny("Specify --preflight or --execute explicitly.");
+const approval = intent ? "EVAL_STRUCTURED_INTENT_EXECUTE_APPROVED" : arm ? `EVAL_LUNA_CONTRACT_${arm}_EXECUTE_APPROVED` : phase2i ? "EVAL_2I_EXECUTE_APPROVED" : singleCall ? "EVAL_2G_SINGLE_CALL_EXECUTE_APPROVED" : phase2g ? "EVAL_2G_EXECUTE_APPROVED" : phase2f ? "EVAL_2F_EXECUTE_APPROVED" : undefined;
+if (approval && args[0] === "--execute" && process.env[approval] !== "1")
+  deny(`${intent ? "Structured intent" : arm ? "Luna contract arm " + arm : "Phase " + (phase2i ? "2I" : singleCall ? "2G single-call diagnostic" : phase2g ? "2G" : "2F")} requires separate execution approval.`);
 if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === "production")
   deny("The Luna launcher is for local, nonproduction execution.");
 
@@ -19,6 +29,7 @@ const required = [
   "EVAL_DEDICATED_PROJECT_CONFIRMED", "EVAL_STANDARD_PRICING_CONFIRMED",
   "EVAL_PROVIDER_PROJECT_LIMIT_REVIEWED",
 ];
+if (intent || phase2g || singleCall) required.push("EVAL_PROVIDER_QUOTA_CONFIRMED");
 const missing = required.filter((name) => process.env[name] !== "1");
 const key = process.env.EVAL_PROJECT_API_KEY ?? "";
 if (!/^sk-proj-[A-Za-z0-9_-]{20,}$/.test(key)) missing.push("EVAL_PROJECT_API_KEY");
@@ -46,22 +57,23 @@ const env = {
   EVAL_DEDICATED_PROJECT_CONFIRMED: process.env.EVAL_DEDICATED_PROJECT_CONFIRMED,
   EVAL_STANDARD_PRICING_CONFIRMED: process.env.EVAL_STANDARD_PRICING_CONFIRMED,
   EVAL_PROVIDER_PROJECT_LIMIT_REVIEWED: process.env.EVAL_PROVIDER_PROJECT_LIMIT_REVIEWED,
+  ...(intent || phase2g || singleCall ? { EVAL_PROVIDER_QUOTA_CONFIRMED: process.env.EVAL_PROVIDER_QUOTA_CONFIRMED } : {}),
   EVAL_VERIFIED_MODELS: "gpt-6-luna",
   EVAL_OUTPUT_PROFILE: "standard",
   EVAL_REASONING_EFFORT: "none",
-  EVAL_MAX_REQUESTS_PER_MODEL: "3",
-  EVAL_MAX_SPEND_MICROS: "40000",
-  EVAL_MAX_MODEL_SPEND_MICROS: "40000",
+  EVAL_MAX_REQUESTS_PER_MODEL: intent ? "6" : singleCall ? "1" : phase2g ? "7" : phase2f ? "9" : "3",
+  EVAL_MAX_SPEND_MICROS: intent ? "30000" : singleCall ? "20000" : phase2g ? "80000" : phase2f ? "100000" : "40000",
+  EVAL_MAX_MODEL_SPEND_MICROS: intent ? "30000" : singleCall ? "20000" : phase2g ? "80000" : phase2f ? "100000" : "40000",
   EVAL_REPORT_PATH: report,
 };
-const cli = fileURLToPath(new URL("./benchmark.ts", import.meta.url));
-const run = (gate) => spawnSync(process.execPath, ["--import", "tsx", cli, "--live", "--suite=luna-smoke"],
+const cli = fileURLToPath(new URL(intent ? "./receptionist-intent-live.ts" : "./benchmark.ts", import.meta.url));
+const run = (gate) => spawnSync(process.execPath, ["--import", "tsx", cli, "--live", args[1] ?? "--suite=luna-smoke"],
   { cwd: fileURLToPath(new URL("../", import.meta.url)), env: { ...env, ...gate }, stdio: "inherit" });
 
 console.log("Private report destination:", report);
 const preflight = run({ EVAL_PREFLIGHT_ONLY: "1" });
 if (preflight.status !== 0) process.exit(preflight.status ?? 1);
 if (args[0] === "--execute") {
-  const execution = run({ EVAL_EXECUTE_APPROVED: "1" });
+  const execution = run({ EVAL_EXECUTE_APPROVED: "1", ...(approval ? { [approval]: "1" } : {}) });
   process.exitCode = execution.status ?? 1;
 }

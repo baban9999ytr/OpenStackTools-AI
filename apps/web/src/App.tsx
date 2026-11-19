@@ -3,7 +3,7 @@ import {
   api,
   type Assistant,
   type Conversation,
-  type Message,
+  type ConversationDetail,
   type Organization,
   type ModelOptions,
   type ModelSelection,
@@ -19,6 +19,13 @@ type Account = { id: string; name: string; email: string };
 type Me = { user: Account; organizations: Organization[] };
 const getError = (error: unknown) =>
   error instanceof Error ? error.message : "Something went wrong";
+const inboxFailureText = {
+  budget: "The assistant reached its spending limit.",
+  rate_limit: "The provider is limiting requests.",
+  configuration: "The assistant or model needs an administrator to check its settings.",
+  provider: "The AI provider could not complete a reply.",
+  incomplete: "A reply could not be completed.",
+};
 const realEstateTemplate = {
   en: "You are a real-estate assistant for this business. Ask for the visitor's budget, currency, preferred location, property type, rooms, and minimum area when relevant. Use search_listings to retrieve current available properties. Mention only listings, prices, and URLs returned by the backend. Use get_business_knowledge for verified services, policies, hours, and contact details. If no listing matches or information is missing, say so and offer a human handoff. Ask for consent before saving contact details. Do not claim an appointment is booked until the backend confirms it.",
   tr: "Bu işletmenin emlak asistanısınız. Gerekli olduğunda ziyaretçinin bütçesini, para birimini, tercih ettiği konumu, mülk türünü, oda sayısını ve asgari alanı sorun. Güncel ve uygun mülkleri search_listings ile alın. Yalnızca sunucunun döndürdüğü ilanları, fiyatları ve bağlantıları belirtin. Doğrulanmış hizmet, politika, çalışma saati ve iletişim bilgileri için get_business_knowledge kullanın. Eşleşen ilan veya bilgi yoksa bunu söyleyin ve insan temsilciye aktarmayı önerin. İletişim bilgilerini kaydetmeden önce onay isteyin. Sunucu doğrulamadan randevunun oluşturulduğunu söylemeyin.",
@@ -254,7 +261,11 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
   );
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selected, setSelected] = useState<string>("");
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [detail, setDetail] = useState<{ key: string; data: ConversationDetail }>();
+  const [inboxRevision, setInboxRevision] = useState(0);
+  const detailKey = `${organizationId}/${selected}`;
+  const currentDetail = detail?.key === detailKey ? detail.data : undefined;
+  const preferences = currentDetail?.preferences;
   const [members, setMembers] = useState<
     Array<{
       userId: string;
@@ -318,19 +329,19 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
     setModelOptions(null);
     setModelSelection(null);
     setSelected("");
-    setMessages([]);
+    setDetail(undefined);
   }, [organizationId]);
   useEffect(() => {
     setModelSelection(editingAssistantId ? editingAssistant?.modelSelection ?? null : modelOptions?.defaultSelection ?? null);
   }, [editingAssistantId, modelOptions]);
   useEffect(() => {
     if (!selected || !organizationId) return;
-    api<{ messages: Message[] }>(
-      `/organizations/${organizationId}/conversations/${selected}/messages`,
-    )
-      .then((data) => setMessages(data.messages))
-      .catch((error) => setError(t(getError(error))));
-  }, [selected, organizationId]);
+    let active = true;
+    api<ConversationDetail>(`/organizations/${organizationId}/conversations/${selected}/messages`)
+      .then((data) => { if (active) setDetail({ key: detailKey, data }); })
+      .catch((error) => { if (active) setError(t(getError(error))); });
+    return () => { active = false; };
+  }, [selected, organizationId, inboxRevision]);
   useEffect(() => {
     if (tab === "sessions")
       api<{ sessions: typeof sessions }>("/auth/sessions")
@@ -458,10 +469,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
         { method: "POST", body: JSON.stringify({ text: data.get("text") }) },
       );
       form.reset();
-      const response = await api<{ messages: Message[] }>(
-        `/organizations/${organizationId}/conversations/${selected}/messages`,
-      );
-      setMessages(response.messages);
+      setInboxRevision((value) => value + 1);
     } catch (error) {
       setError(t(getError(error)));
     }
@@ -761,10 +769,10 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
           </div>
         )}
         {tab === "receptionist" && organization && (
-          <Receptionist organizationId={organizationId} role={organization.role} />
+          <Receptionist key={organizationId} organizationId={organizationId} role={organization.role} />
         )}
         {tab === "business" && organization && (
-          <Business organizationId={organizationId} role={organization.role} />
+          <Business key={organizationId} organizationId={organizationId} role={organization.role} />
         )}
         {tab === "channels" && organization && (
           <Channels organizationId={organizationId} role={organization.role} assistants={assistants}
@@ -801,8 +809,32 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
               <h2>{t(selected ? "Conversation" : "Select a conversation")}</h2>
               {selected && (
                 <>
+                  <button className="secondary" onClick={() => setInboxRevision((value) => value + 1)}>{t("Refresh conversation")}</button>
+                  {preferences && (preferences.locations.length > 0 || preferences.rooms.length > 0 || preferences.budgetUnknown ||
+                    preferences.budget !== undefined || preferences.listingType || preferences.propertyType) && (
+                    <section aria-label={t("Saved preferences")}>
+                      <h3>{t("Saved preferences")}</h3>
+                      <ul>
+                        {preferences.locations.length > 0 && <li>{t("Location")}: {preferences.locations.join(" / ")}</li>}
+                        {preferences.rooms.length > 0 && <li>{t("Rooms")}: {preferences.rooms.map((rooms) => `${rooms}+1`).join(" / ")}</li>}
+                        {preferences.budget !== undefined && <li>{t("Budget")}: {preferences.budget.toLocaleString(locale)} {preferences.currency}</li>}
+                        {preferences.budgetUnknown && <li>{t("Budget is undecided.")}</li>}
+                        {preferences.listingType && <li>{t("Listing type")}: {t(preferences.listingType)}</li>}
+                        {preferences.propertyType && <li>{t("Property type")}: {t(preferences.propertyType)}</li>}
+                      </ul>
+                    </section>
+                  )}
+                  {currentDetail?.recentFailures && currentDetail.recentFailures.length > 0 && (
+                    <section aria-label={t("Recent reply failures")}>
+                      <h3>{t("Recent reply failures")}</h3>
+                      <ul>{currentDetail.recentFailures.map((failure, index) => (
+                        <li key={index}>{new Date(failure.createdAt).toLocaleString(locale)} · {t(inboxFailureText[failure.category])}</li>
+                      ))}</ul>
+                      <p className="muted">{t("Review the conversation before returning it to the assistant.")}</p>
+                    </section>
+                  )}
                   <div className="message-list">
-                    {messages.map((message) => (
+                    {currentDetail?.messages.map((message) => (
                       <div
                         key={message._id}
                         className={`message ${message.role}`}

@@ -6,22 +6,31 @@ export type PreferenceField = typeof fields[number];
 const evidenceSchema = z.strictObject({ value: z.union([z.string().max(100), z.number().finite(), z.boolean()]),
   evidence: z.string().min(1).max(160), requestId: z.string().regex(/^[a-f\d]{24}$/i) });
 export const businessStateSchema = z.strictObject({
+  alternatives: z.strictObject({
+    location: z.array(z.string().trim().min(2).max(60)).min(2).max(3).optional(),
+    rooms: z.array(z.number().int().min(0).max(50)).min(2).max(3).optional(),
+  }).default({}),
+  budgetUnknown: z.boolean().default(false),
   viewingOffered: z.boolean().default(false),
   values: z.partialRecord(fieldSchema, evidenceSchema), asked: z.array(fieldSchema).max(9),
   refused: z.array(z.enum([...fields, "phone"])).max(10),
 });
 export type BusinessState = z.infer<typeof businessStateSchema>;
-export const emptyBusinessState = (): BusinessState => ({ values: {}, asked: [], refused: [], viewingOffered: false });
+export const emptyBusinessState = (): BusinessState => ({ values: {}, alternatives: {}, budgetUnknown: false, asked: [], refused: [], viewingOffered: false });
 export function extractBusinessTurn(text: string, requestId: string, prior?: unknown) {
   const input = text.slice(0, 4000);
   const updates: BusinessState["values"] = {};
+  const alternatives: BusinessState["alternatives"] = {};
+  const clearLocation = /(?:konum|semt|mahalle).{0,12}fark etmez|(?:any|no preferred) (?:location|neighbou?rhood)/i.test(input);
+  let clearRooms = /oda sayısı.{0,12}fark etmez|any (?:room count|layout)/i.test(input);
+  const budgetUnknown = /bütçem? (?:henüz )?belli değil|budget (?:is )?(?:unknown|not set|undecided)/i.test(input);
   const conflicts = new Set<PreferenceField>();
   const put = (field: PreferenceField, value: string | number | boolean, evidence: string) => {
     if (updates[field] && updates[field]?.value !== value) conflicts.add(field);
     updates[field] = { value, evidence: evidence.slice(0, 160), requestId };
   };
   const pending = businessStateSchema.safeParse(prior).data;
-  const lastQuestion = pending?.asked.filter((field) => !pending.values[field] && !pending.refused.includes(field)).at(-1);
+  const lastQuestion = pending?.asked.filter((field) => !pending.values[field] && !pending.refused.includes(field) && !(field === "location" && pending.alternatives.location)).at(-1);
   if (lastQuestion === "location" && /^[\p{L} ]{2,60}$/u.test(input.trim()) &&
       !/istemiyorum|hayır|bilmiyorum|no|help|yardım|merhaba|hello/i.test(input))
     put("location", input.trim(), input);
@@ -42,7 +51,7 @@ export function extractBusinessTurn(text: string, requestId: string, prior?: unk
     ["propertyType", "apartment", /\bdaire\b|\bapartment\b/i], ["propertyType", "house", /\bmüstakil\b|\bhouse\b/i],
     ["propertyType", "land", /\barsa\b|\bland\b/i], ["propertyType", "commercial", /\bdükkan\b|\bcommercial\b/i],
     ["listingType", "rent", /kiral[iı]k|\brent(?:al)?\b/i], ["listingType", "sale", /sat[iı]l[iı]k|\bbuy\b|\bfor sale\b/i],
-    ["furnished", false, /eşyasız|esyasiz|unfurnished/i], ["furnished", true, /eşyalı|esyali|(?<!un)\bfurnished\b/i],
+    ["furnished", false, /eşyasız|esyasiz|mobilyasız|mobilyasiz|unfurnished/i], ["furnished", true, /eşyalı|esyali|(?<!un)\bfurnished\b/i],
     ["balcony", true, /balkon.{0,8}(?:olsun|istiyorum)|want.{0,8}balcony/i],
   ];
   for (const [field, value, regex] of mappings) {
@@ -50,6 +59,7 @@ export function extractBusinessTurn(text: string, requestId: string, prior?: unk
     if (!match) continue;
     const following = input.slice(match.index + match[0].length);
     if (field === "listingType" && /^\s+(?:değil|degil)(?=\s|[,!.?]|$)/i.test(following)) continue;
+    if (field === "furnished" && value === true && /^\s+diye düşünmüştüm[,.;]/i.test(following) && /mobilyasız|eşyasız/i.test(following)) continue;
     put(field, value, match[0]);
   }
   const refusePhone = /telefon.{0,25}(?:vermek|paylaşmak).{0,10}istemiyorum|(?:won't|do not want to|don't want to).{0,20}(?:phone|number)/i.test(input);
@@ -59,12 +69,63 @@ export function extractBusinessTurn(text: string, requestId: string, prior?: unk
   if (/[?]|ne kadar|fiyatı|what price|how much/i.test(input) && !/bütçe|budget|under|altında|geçmesin|istiyorum|prefer/i.test(input)) {
     delete updates.budget; delete updates.currency; delete updates.furnished;
   }
+  const layouts = [...input.matchAll(/\b(\d{1,2})\s*\+\s*1\b/g)];
+  const alternativesLinked = layouts.length >= 2 && layouts.length <= 3 && layouts.slice(1).every((current, i) => {
+    const previous = layouts[i]!;
+    return /^\s*(?:ya da|veya|or|\/|,)\s*$/i.test(input.slice(previous.index + previous[0].length, current.index));
+  });
+  const roomWords = ["sıfır", "bir", "iki", "üç", "dört", "beş", "altı"];
+  const roomOptions = /(?:^|\s)(bir|iki|üç|dört|beş|altı|\d{1,2})\s+(?:ya da|veya)\s+(bir|iki|üç|dört|beş|altı|\d{1,2})\s+odal[ıi]/i.exec(input);
+  const roomValues = [...new Set((alternativesLinked ? layouts.map((layout) => layout[1]!) : roomOptions?.slice(1))?.map((value) =>
+    /^\d+$/.test(value) ? Number(value) : roomWords.indexOf(value.toLocaleLowerCase("tr"))))];
+  if (roomValues.length > 1 && roomValues.every((value) => value >= 0 && value <= 50)) {
+    alternatives.rooms = roomValues;
+    conflicts.delete("rooms");
+    delete updates.rooms;
+  }
+  const places = /(?:^|[,.!?;]\s*)([\p{Lu}][\p{L}-]{1,59})\s+(?:de|da|veya|ya da)\s+([\p{Lu}][\p{L}-]{1,59})(?:\s+(?:de|da))?\s+olur(?=[,.!?;]|$)/u.exec(input);
+  if (places && places[1]!.toLocaleLowerCase("tr") !== places[2]!.toLocaleLowerCase("tr")) {
+    alternatives.location = [places[1]!, places[2]!];
+    conflicts.delete("location");
+    delete updates.location;
+  }
+  const labeledPlaces = /(?:locations?|konum|semt|mahalle)\s*:\s*([\p{L} '-]{2,60}?)\s+(?:or|veya|ya da)\s+([\p{L} '-]{2,60})(?=[,.!?;]|$)/iu.exec(input);
+  if (labeledPlaces && !places) {
+    const [first, second] = labeledPlaces.slice(1).map((place) => place.trim());
+    if (first && second && first.toLocaleLowerCase("tr") !== second.toLocaleLowerCase("tr")) {
+      alternatives.location = [first, second];
+      delete updates.location;
+      conflicts.delete("location");
+    }
+  }
+  const dropLocation = /(?:^|[.!?]\s*)(?:drop|remove|çıkar|cikar)\s+([\p{L} '-]{2,60})(?=[,.!?;]|$)/iu.exec(input);
+  if (dropLocation && pending?.alternatives.location && !alternatives.location) {
+    const remaining = pending.alternatives.location.filter((place) =>
+      place.toLocaleLowerCase("tr") !== dropLocation[1]!.trim().toLocaleLowerCase("tr"));
+    if (remaining.length < pending.alternatives.location.length) {
+      if (remaining.length === 1) put("location", remaining[0]!, dropLocation[0]);
+      else alternatives.location = remaining;
+    }
+  }
+  const dropRoom = /^(\d{1,2})\s*\+\s*1\s+(?:olmasın|olmasin)\s*[.!]?$/i.exec(input.trim());
+  if (dropRoom) {
+    delete updates.rooms;
+    const removed = Number(dropRoom[1]);
+    const remaining = pending?.alternatives.rooms?.filter((layout) => layout !== removed);
+    if (remaining && remaining.length !== pending?.alternatives.rooms?.length) {
+      if (remaining.length === 1) put("rooms", remaining[0]!, dropRoom[0]);
+      else alternatives.rooms = remaining;
+    } else if (pending?.values.rooms?.value === removed) clearRooms = true;
+  }
+  // A broad preference withdrawal takes priority over a nearby extracted value.
+  if (clearLocation) { delete updates.location; delete alternatives.location; }
+  if (clearRooms) { delete updates.rooms; delete alternatives.rooms; }
   const correction = /önceki|artık|yerine|değil|degil|instead|actually|previous|change/i.test(input);
   // Contradictory values in one message need clarification; don't guess which clause wins.
   for (const field of conflicts) delete updates[field];
   const withdrawBudget = !updates.budget &&
-    /bütçe(?:mi|yi)?(?:\s+[^,.!? ]+){0,2}\s+(?:unut|boş ver)|(?:forget|drop|remove).{0,32}(?:budget|price limit)/i.test(input);
-  return { updates, withdrawBudget, conflicts: [...conflicts], refused, correction,
+    (budgetUnknown || /bütçe(?:mi|yi)?(?:\s+[^,.!? ]+){0,2}\s+(?:unut|boş ver)|(?:forget|drop|remove).{0,32}(?:budget|price limit)/i.test(input));
+  return { updates, alternatives, clearLocation, clearRooms, budgetUnknown, withdrawBudget, conflicts: [...conflicts], refused, correction,
     searching: /ar[iı]yorum|looking for|search|kiral[iı]k|sat[iı]l[iı]k/i.test(input),
     handoff: /(?:insan|danışman|danisman|human|person|agent).{0,25}(?:konuş|görüş|aktar|speak|talk)|(?:speak|talk).{0,15}(?:human|person|agent)/i.test(input),
     injection: /ignore.{0,20}(?:rules|instructions)|sistem talimat|başka kiracı|another tenant|organizationId|run_arbitrary_code/i.test(input),
@@ -76,6 +137,12 @@ export function mergeBusinessState(raw: unknown, turn: ReturnType<typeof extract
   if (turn.injection || turn.conflicts.length || turn.topicChange) return state;
   const refused = [...new Set([...state.refused, ...turn.refused])];
   const values = { ...state.values, ...turn.updates };
+  const alternatives = { ...state.alternatives };
+  for (const [field, clear] of [["location", turn.clearLocation], ["rooms", turn.clearRooms]] as const) {
+    if (values[field] && (turn.alternatives[field] || clear)) delete values[field];
+    if (turn.updates[field] || clear) delete alternatives[field];
+  }
+  Object.assign(alternatives, turn.alternatives);
   for (const field of refused) if (field !== "phone") delete values[field];
   if (turn.withdrawBudget) {
     delete values.budget;
@@ -83,11 +150,11 @@ export function mergeBusinessState(raw: unknown, turn: ReturnType<typeof extract
   }
   const asked = turn.withdrawBudget && state.values.budget
     ? state.asked.filter((field) => field !== "budget" && field !== "currency") : state.asked;
-  return businessStateSchema.parse({ values, refused, asked, viewingOffered: state.viewingOffered });
+  return businessStateSchema.parse({ values, alternatives, budgetUnknown: !values.budget && (turn.budgetUnknown || state.budgetUnknown), refused, asked, viewingOffered: state.viewingOffered });
 }
 // Generic question planner: business adapters own labels and priorities, never shared orchestration.
 export function nextQuestions(state: BusinessState, priorities: readonly PreferenceField[], limit = 2) {
-  return priorities.filter((field) => !state.values[field] && !state.refused.includes(field) && !state.asked.includes(field))
+  return priorities.filter((field) => !state.values[field] && !(field === "location" && state.alternatives.location) && !(field === "budget" && state.budgetUnknown) && !state.refused.includes(field) && !state.asked.includes(field))
     .slice(0, Math.max(0, Math.min(2, limit)));
 }
 const questions: Record<string, [string, string]> = {
@@ -109,8 +176,8 @@ export function businessFilters(state: BusinessState) {
   const v = state.values;
   if (!v.listingType || (v.budget && !v.currency)) return null;
   return { listingType: v.listingType.value, availability: "available",
-    ...(v.location ? { location: v.location.value } : {}), ...(v.budget ? { budgetMax: v.budget.value } : {}),
-    ...(v.currency ? { currency: v.currency.value } : {}), ...(v.rooms ? { exactRooms: v.rooms.value } : {}),
+    ...(state.alternatives.location ? { locations: state.alternatives.location } : v.location ? { location: v.location.value } : {}), ...(v.budget ? { budgetMax: v.budget.value } : {}),
+    ...(v.currency ? { currency: v.currency.value } : {}), ...(state.alternatives.rooms ? { roomLayouts: state.alternatives.rooms } : v.rooms ? { exactRooms: v.rooms.value } : {}),
     ...(v.propertyType ? { propertyType: v.propertyType.value } : {}) };
 }
 const proposals = z.strictObject({ fields: z.array(z.strictObject({
@@ -120,8 +187,8 @@ export function validateBusinessProposal(raw: unknown, text: string, requestId: 
   const parsed = proposals.safeParse(raw);
   if (!parsed.success) return null;
   const base = extractBusinessTurn(text, requestId);
-  if (base.injection || base.withdrawBudget || base.conflicts.length) return null;
-  const updates: BusinessState["values"] = {};
+  if (base.injection || (base.withdrawBudget && !base.budgetUnknown) || base.conflicts.length) return null;
+  const updates: BusinessState["values"] = { ...base.updates };
   for (const item of parsed.data.fields) {
     if (!text.includes(item.evidence)) return null;
     let checked = extractBusinessTurn(item.evidence, requestId).updates[item.field];
@@ -131,6 +198,10 @@ export function validateBusinessProposal(raw: unknown, text: string, requestId: 
         /^[\p{L} ]{2,60}$/u.test(item.evidence) &&
         (text.includes(`near ${item.evidence}`) || text.includes(`${item.evidence} civarı`)))
       checked = { value: item.value, evidence: item.evidence, requestId };
+    if (item.field === "location" || item.field === "rooms") {
+      const options = extractBusinessTurn(item.evidence, requestId).alternatives[item.field];
+      if (options?.some((option) => option === item.value) && base.alternatives[item.field]?.some((option) => option === item.value)) continue;
+    }
     if (!checked || checked.value !== item.value || (updates[item.field] && updates[item.field]?.value !== item.value)) return null;
     updates[item.field] = checked;
   }

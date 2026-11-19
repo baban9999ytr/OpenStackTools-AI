@@ -124,7 +124,8 @@ export const isAvailabilityFollowUp = (query: string) =>
   /(?:başka|alternatif|farklı|other|alternative).{0,55}(?:saat|zaman|gün|tarih|slot|time|day|date)|(?:müsait|uygun|available|availability).{0,70}(?:bak|kontrol|check|ara|search)|(?:bak|kontrol|check|ara|search).{0,70}(?:müsait|uygun|available|availability)/i.test(query);
 
 export const asksForPropertyViewing = (query: string) => /\b(?:view|viewing|showing|see (?:the|that) (?:apartment|property|flat|house))\b|(?:daire|ev|ilan|konut).{0,35}(?:görmek|gezmek|gösterim)|yer gösterimi/i.test(query);
-export const staffCanShowProperty = (services: string[]) => services.some((service) => /yer gösterimi|ev gösterimi|konut gösterimi|property showing|property viewing|viewings?/i.test(service));
+export const propertyViewingServicePattern = /yer gösterimi|ev gösterimi|konut gösterimi|property showing|property viewing|viewings?/i;
+export const staffCanShowProperty = (services: string[]) => services.some((service) => propertyViewingServicePattern.test(service));
 export const asksForSchedulingAvailability = (query: string) =>
   /müsait|musait|randevu|appointment|availability|available|openings|\bslots?\b/i.test(query) &&
   /danışman|danisman|consultant|staff|randevu|appointment|görmek|gezmek|viewing|showing|saat|time|yarın|yarin|tomorrow|akşam|aksam|evening|sabah|morning|afternoon|öğleden sonra/i.test(query);

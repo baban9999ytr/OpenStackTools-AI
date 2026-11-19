@@ -1,6 +1,6 @@
 export type BenchmarkTurn = {
   text: string;
-  preferences?: Record<string, string | number>;
+  preferences?: Record<string, string | number | boolean>;
   refused?: string;
   tool?: "search_listings" | "handoff_to_human" | "get_business_knowledge";
   args?: Record<string, unknown>;
@@ -9,12 +9,18 @@ export type BenchmarkTurn = {
   offeredAfternoon?: boolean;
   expectsModel?: boolean;
   fixtureText?: string;
+  reviewFocus?: string;
+  rawContextSignals?: RegExp[];
   unknownFee?: boolean;
+  priceComparison?: boolean;
   referenceOrdinal?: number;
+  alternatives?: { location?: string[]; rooms?: number[] };
+  contactFields?: Array<"email" | "website" | "phone" | "address">;
   missingPreferences?: string[];
+  expectedProposal?: { name: string; arguments: unknown } | null;
   proposal?: { name: string; arguments: unknown };
 };
-export type BenchmarkCase = { id: string; locale: "tr" | "en"; turns: BenchmarkTurn[] };
+export type BenchmarkCase = { id: string; locale: "tr" | "en"; prelude?: Array<{ role: "customer" | "assistant"; text: string }>; turns: BenchmarkTurn[] };
 export const benchmarkVersion = "astra-conversations-v2";
 export const benchmarkCases: BenchmarkCase[] = [
   { id: "tr-directory-correction", locale: "tr", turns: [
@@ -40,7 +46,7 @@ export const benchmarkCases: BenchmarkCase[] = [
   { id: "tr-comparison-and-empty-inventory", locale: "tr", turns: [
     { text: "Ben Ahmet. Görükle'de 3+1 kiralık daire arıyorum. Bütçem 35 bin TL.",
       preferences: { name: "Ahmet", rooms: 3, budget: 35000 }, tool: "search_listings", reply: /27\.000/ },
-    { text: "İki ilanı karşılaştır, hangisini önerirsin?", expectsModel: true,
+    { text: "İki ilanı karşılaştır, hangisini önerirsin?", expectsModel: true, priceComparison: true,
       preferences: { budget: 35000 }, reply: /27\.000|34\.000/ },
     { text: "Konum: Mudanya. Aynı bütçeyle kiralık daire arıyorum.",
       preferences: { location: "Mudanya", budget: 35000 }, tool: "search_listings", reply: /ilan bulamadım/ },

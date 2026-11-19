@@ -273,6 +273,7 @@ test("four model modes persist without changing legacy profiles and expose unava
     await page.getByRole("radio", { name: new RegExp(`^${label}`) }).check();
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect.poll(() => assistant.modelSelection).toEqual({ mode: "product", choice });
+    await expect(page.getByRole("heading", { name: "Create assistant" })).toBeVisible();
     await page.getByRole("button", { name: "Edit settings" }).click();
     await expect(page.getByRole("radio", { name: new RegExp(`^${label}`) })).toBeChecked();
   }
@@ -282,4 +283,112 @@ test("four model modes persist without changing legacy profiles and expose unava
   await expect(page.getByRole("radio", { name: /^Çok güçlü/ })).toBeDisabled();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect((await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze()).violations).toEqual([]);
+});
+
+test("pilot listing editor renders verified zero and false, clears facts and edits availability", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockDashboard(page);
+  const item: Record<string, unknown> = { _id: "pilot-flat", title: "Pilot Flat", description: "Verified listing", price: 12345.50,
+    currency: "TRY", location: "Görükle", propertyType: "apartment", listingType: "rent", availability: "available",
+    areaSqm: 80, facts: { maintenanceFee: 0, furnished: false }, updatedAt: "2026-11-18T14:00:00Z" };
+  let saved: Record<string, unknown> | undefined;
+  await page.route("**/api/organizations/org1/knowledge", route => route.fulfill({ json: { knowledge: null } }));
+  await page.route("**/api/organizations/org1/listings**", route => {
+    if (route.request().method() === "PATCH") {
+      saved = route.request().postDataJSON() as Record<string, unknown>;
+      Object.assign(item, saved);
+      return route.fulfill({ json: { listing: item } });
+    }
+    return route.fulfill({ json: { listings: [item] } });
+  });
+  for (const [path, json] of [["conversation-summaries", { summaries: [] }], ["receptionist/customers", { customers: [] }],
+    ["receptionist/config", { staff: [] }], ["leads/follow-up", { customers: [] }]] as const)
+    await page.route(`**/api/organizations/org1/${path}`, route => route.fulfill({ json }));
+  await page.goto("http://127.0.0.1:5173/app");
+  await page.getByRole("button", { name: "Menu" }).click();
+  await page.getByRole("button", { name: "Business", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(page.getByRole("spinbutton", { name: /^Maintenance fee/ })).toHaveValue("0");
+  await expect(page.getByRole("spinbutton", { name: /^Deposit/ })).toHaveValue("");
+  await expect(page.getByLabel("Furnishing status")).toHaveValue("false");
+  await expect(page.getByRole("spinbutton", { name: "Rooms" })).toHaveValue("");
+  await page.getByLabel("Availability").selectOption("sold");
+  await page.getByRole("button", { name: "Save listing" }).click();
+  await expect.poll(() => saved?.facts).toEqual({ maintenanceFee: 0, furnished: false });
+  expect(saved).toMatchObject({ availability: "sold", rooms: null, price: 12345.50 });
+  await expect(page.getByRole("heading", { name: "Add listing" })).toBeVisible();
+  for (const name of ["Price", "Area (m²)"]) {
+    const field = page.getByRole("spinbutton", { name, exact: true });
+    await expect(field).toHaveValue("");
+    expect(await field.evaluate((input: HTMLInputElement) => input.validity.valueMissing)).toBe(true);
+  }
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("spinbutton", { name: /^Maintenance fee/ }).clear();
+  await page.getByLabel("Furnishing status").selectOption("");
+  await page.getByRole("button", { name: "Save listing" }).click();
+  await expect.poll(() => saved?.facts).toEqual({});
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect((await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze()).violations).toEqual([]);
+});
+
+test("pilot inbox presents preferences and safe failure categories before staff takeover", async ({ page }) => {
+  await mockDashboard(page);
+  const conversation = { _id: "pilot-chat", assistantId: "pilot-assistant", status: "bot", updatedAt: "2026-11-18T14:00:00Z" };
+  await page.route("**/api/organizations/org1/conversations", route => route.fulfill({ json: { conversations: [conversation] } }));
+  await page.route("**/api/organizations/org1/conversations/pilot-chat/messages", route => route.fulfill({ json: {
+    messages: [{ _id: "pilot-msg", role: "customer", text: "I would like a viewing." }],
+    preferences: { locations: ["Görükle", "Özlüce"], rooms: [2, 3], budgetUnknown: true },
+    recentFailures: [{ category: "provider", createdAt: "2026-11-18T14:00:00Z" }],
+  } }));
+  await page.route("**/api/organizations/org1/conversations/pilot-chat/status", route => {
+    conversation.status = route.request().postDataJSON().status;
+    return route.fulfill({ json: { conversation } });
+  });
+  await page.goto("http://127.0.0.1:5173/app");
+  await page.getByRole("button", { name: "Conversations", exact: true }).click();
+  await page.getByRole("button", { name: /Assistant.*bot/ }).click();
+  await expect(page.getByText("I would like a viewing.")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Saved preferences" })).toContainText("Görükle / Özlüce");
+  await expect(page.getByRole("region", { name: "Saved preferences" })).toContainText("2+1 / 3+1");
+  await expect(page.getByRole("region", { name: "Recent reply failures" })).toContainText("The AI provider could not complete a reply.");
+  await page.getByRole("button", { name: "Take over" }).click();
+  await expect(page.getByRole("textbox", { name: "Reply as staff" })).toBeVisible();
+  expect(conversation.status).toBe("handoff");
+});
+
+test("pilot receptionist requires fresh confirmation when time or search criteria change", async ({ page }) => {
+  await mockDashboard(page);
+  const base = "**/api/organizations/org1/receptionist";
+  let changed = false;
+  await page.route(`${base}/config`, route => route.fulfill({ json: {
+    timeZone: "Europe/Istanbul", openingHours: [], staff: [{ id: "pilot-staff", name: "Pilot Agent", windows: [], viewingEnabled: changed }],
+  } }));
+  await page.route(`${base}/staff/pilot-staff/availability`, route => {
+    changed = route.request().postDataJSON().viewingEnabled;
+    return route.fulfill({ json: { ok: true } });
+  });
+  for (const [name, response] of [["appointments", { appointments: [] }], ["customers", { customers: [] }],
+    ["actions", { actions: [] }]] as const)
+    await page.route(`${base}/${name}`, route => route.fulfill({ json: response }));
+  await page.route(`${base}/availability?**`, route => route.fulfill({ json: { available: [
+    { startAt: "2026-12-10T11:00:00Z", endAt: "2026-12-10T11:30:00Z" },
+    { startAt: "2026-12-10T12:00:00Z", endAt: "2026-12-10T12:30:00Z" },
+  ] } }));
+  await page.goto("http://127.0.0.1:5173/app");
+  await page.getByRole("button", { name: "Receptionist", exact: true }).click();
+  await page.getByLabel("Can host property viewings").check();
+  await page.getByRole("button", { name: "Save availability", exact: true }).click();
+  await expect(page.getByText("Staff availability saved.")).toBeVisible();
+  expect(changed).toBe(true);
+  await page.getByLabel("Date", { exact: true }).fill("2026-12-10");
+  await page.getByRole("button", { name: "Check availability" }).click();
+  const availableTime = page.getByRole("combobox", { name: "Available time", exact: true });
+  await availableTime.selectOption("2026-12-10T11:00:00Z");
+  await page.getByLabel("I confirm this booking").check();
+  await expect(page.getByRole("button", { name: "Book appointment" })).toBeEnabled();
+  await availableTime.selectOption("2026-12-10T12:00:00Z");
+  await expect(page.getByRole("button", { name: "Book appointment" })).toBeDisabled();
+  await page.getByLabel("I confirm this booking").check();
+  await page.getByRole("combobox", { name: "Duration (minutes)", exact: true }).selectOption("45");
+  await expect(page.getByRole("button", { name: "Book appointment" })).toHaveCount(0);
 });

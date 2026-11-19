@@ -2,6 +2,8 @@ import mongoose from "mongoose";
 import { z } from "zod";
 import { BusinessKnowledge, Listing, Organization } from "../models/index.js";
 
+import { propertyFactsSchema } from "./property-facts.js";
+
 const short = (max: number) => z.string().trim().max(max);
 const named = (max: number) => z.string().trim().min(1).max(max);
 export const knowledgeInput = z.strictObject({
@@ -21,6 +23,7 @@ export const listingInput = z.strictObject({
   rooms: z.number().int().min(0).max(50).optional(),
   areaSqm: z.number().finite().min(1).max(1_000_000),
   availability: z.enum(["available", "reserved", "sold"]),
+  facts: propertyFactsSchema.optional(),
   publicUrl: z.url().refine((value) => value.startsWith("https://") && value.length <= 500).optional(),
 });
 export const listingFilters = z.strictObject({
@@ -31,10 +34,13 @@ export const listingFilters = z.strictObject({
   propertyType: listingInput.shape.propertyType.optional(),
   listingType: listingInput.shape.listingType,
   exactRooms: z.number().int().min(0).max(50).optional(),
+  roomLayouts: z.array(z.number().int().min(0).max(50)).min(1).max(3).optional(),
   minRooms: z.number().int().min(0).max(50).optional(),
   minAreaSqm: z.number().finite().min(0).max(1_000_000).optional(),
   availability: z.enum(["available", "reserved", "sold"]).default("available"),
-}).refine((value) => value.budgetMax === undefined || value.currency !== undefined, "Currency is required with a budget");
+}).refine((value) => value.budgetMax === undefined || value.currency !== undefined, "Currency is required with a budget")
+  .refine((value) => !value.roomLayouts || (value.exactRooms === undefined && value.minRooms === undefined),
+    "Room alternatives cannot be combined with a single room constraint");
 
 export const searchListings = async (organizationId: mongoose.Types.ObjectId, raw: unknown, freshOnly = true, allStatuses = false) => {
   const filters = listingFilters.parse(raw);
@@ -45,6 +51,7 @@ export const searchListings = async (organizationId: mongoose.Types.ObjectId, ra
   if (filters.currency) query.currency = filters.currency;
   if (filters.propertyType) query.propertyType = filters.propertyType;
   if (filters.listingType) query.listingType = filters.listingType;
+  if (filters.roomLayouts) query.rooms = { $in: filters.roomLayouts };
   if (filters.exactRooms !== undefined) query.rooms = filters.exactRooms;
   if (filters.minRooms !== undefined && filters.exactRooms === undefined) query.rooms = { $gte: filters.minRooms };
   if (filters.minAreaSqm !== undefined) query.areaSqm = { $gte: filters.minAreaSqm };
@@ -62,8 +69,8 @@ export const searchListings = async (organizationId: mongoose.Types.ObjectId, ra
     if (alternatives.some((terms) => !terms.length || terms.length > 6)) return [];
     query.$or = alternatives.map((terms) => ({ $and: terms.map((term) => ({ location: { $regex: pattern(term), $options: "i" } })) }));
   }
-  const found = await Listing.find(query).select("title description location price currency listingType propertyType rooms areaSqm availability publicUrl updatedAt")
-    .sort({ updatedAt: -1 }).limit(freshOnly ? filters.locations ? 30 : 10 : 100).lean();
+  const found = await Listing.find(query).select("title description location price currency listingType propertyType rooms areaSqm availability publicUrl updatedAt facts")
+    .sort({ updatedAt: -1, _id: 1 }).limit(freshOnly ? filters.locations ? 30 : 10 : 100).lean();
   if (!filters.locations?.length) return found;
   const folded = (value: string) => value.toLocaleLowerCase("tr").normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "i");
@@ -74,12 +81,32 @@ export const searchListings = async (organizationId: mongoose.Types.ObjectId, ra
   return found.sort((a, b) => rank(a.location) - rank(b.location)).slice(0, freshOnly ? 10 : 100);
 };
 
+const contactPatterns = {
+  email: /e[\s-]?(?:mail|posta)|eposta/i,
+  website: /web\s*(?:site|adres)|website|site url/i,
+  phone: /telefon|\bphone\b|\btelephone\b/i,
+  address: /(?:^|[^\p{L}-])adres(?:iniz|i|in)?(?=\s|[,.!?]|$)|\b(?:street|office|business|postal|physical) address\b|^address$/iu,
+};
+export const requestedContactFields = (topic: string) => {
+  const nonAddress = topic.replace(/(?:e[ -]?(?:mail|posta)|web(?:site| sitesi)?)\s+(?:adres\p{L}*|address)/giu, "");
+  return (Object.keys(contactPatterns) as Array<keyof typeof contactPatterns>).filter(
+    (field) => contactPatterns[field].test(field === "address" ? nonAddress : topic));
+};
+
 export const retrieveKnowledge = async (organizationId: mongoose.Types.ObjectId, topic: string) => {
   const [knowledge, organization] = await Promise.all([
     BusinessKnowledge.findOne({ organizationId }).lean(),
     Organization.findById(organizationId).select("timeZone openingHours").lean(),
   ]);
   const needle = topic.trim().toLocaleLowerCase().slice(0, 100);
+  const contactFields = requestedContactFields(needle);
+  if (contactFields.length) {
+    const contact = Object.fromEntries(contactFields.flatMap((field) => {
+      const value = knowledge?.contact?.[field];
+      return value ? [[field, value]] : [];
+    }));
+    return { contact, timeZone: organization?.timeZone ?? "UTC" };
+  }
   const intent = /service|hizmet|offer|yardım/.test(needle) ? "services"
     : /contact|iletişim|telefon|email|address|adres/.test(needle) ? "contact"
       : /hour|saat|open|açık|çalışma/.test(needle) ? "hours"

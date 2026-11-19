@@ -60,3 +60,32 @@ export function createBenchmarkMeter(limits: { global: number; perModel: number;
     },
   };
 }
+
+export const phase2gEnvelope = { calls: 7, capMicros: 80_000, reservationMicros: 71_813, outputTokens: 512 } as const;
+
+export const phase2gSingleCallEnvelope = { calls: 1, capMicros: 20_000, reservationMicros: 10_259, outputTokens: 512 } as const;
+export const phase2gSingleCallApproval = "EVAL_2G_SINGLE_CALL_EXECUTE_APPROVED";
+
+export const lunaContractApprovals = {
+  a: "EVAL_LUNA_CONTRACT_A_EXECUTE_APPROVED",
+  b: "EVAL_LUNA_CONTRACT_B_EXECUTE_APPROVED",
+} as const;
+export const phase2iApproval = "EVAL_2I_EXECUTE_APPROVED";
+
+export function assertPhase2gEnvelope(env: NodeJS.ProcessEnv, plannedCalls: number, reservation: number,
+  limits: { global: number; perModel: number; requests: number },
+  profile: { profile: string; maxOutputTokens: number; effort: string }, singleCall = false, releaseCandidate = false, decisionArm?: keyof typeof lunaContractApprovals) {
+  const envelope = singleCall ? phase2gSingleCallEnvelope : phase2gEnvelope;
+  const approval = decisionArm ? lunaContractApprovals[decisionArm] : releaseCandidate ? phase2iApproval : singleCall ? phase2gSingleCallApproval : "EVAL_2G_EXECUTE_APPROVED";
+  const label = decisionArm ? `Luna contract arm ${decisionArm.toUpperCase()}` : releaseCandidate ? "Phase 2I release candidate" : singleCall ? "Phase 2G single-call diagnostic" : "Phase 2G";
+  if (env.EVAL_PREFLIGHT_ONLY !== "1" && env[approval] !== "1")
+    throw new Error(`${label} requires separate execution approval`);
+  if (env.EVAL_PROVIDER_QUOTA_CONFIRMED !== "1" || env.EVAL_PROVIDER_PROJECT_LIMIT_REVIEWED !== "1" ||
+      env.EVAL_VERIFIED_MODELS?.trim() !== "gpt-6-luna" || !env.EVAL_PRICE_CHECKED_AT?.endsWith("Z"))
+    throw new Error("Phase 2G project attestations are incomplete");
+  if (plannedCalls !== envelope.calls || limits.requests !== envelope.calls ||
+      limits.global !== envelope.capMicros || limits.perModel !== envelope.capMicros ||
+      profile.profile !== "standard" || profile.effort !== "none" || profile.maxOutputTokens !== envelope.outputTokens ||
+      !Number.isSafeInteger(reservation) || reservation < 1 || reservation * plannedCalls > envelope.reservationMicros)
+    throw new Error(`${label} envelope differs from the required limits`);
+}

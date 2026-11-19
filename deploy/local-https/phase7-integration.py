@@ -164,7 +164,7 @@ def main():
         subprocess.run(COMPOSE + ["exec", "-T", "-e", f"LISTING_ID={stale_id}", "-e", f"ORG_ID={org_a}",
             "mongo", "bash", "-lc", stale_script], check=True, stdout=subprocess.DEVNULL)
         stale, _ = action(widget_b, token_b, "search_listings", {"location": "Istanbul", "currency": "USD", "budgetMax": 120000})
-        assert stale["action"]["result"]["listings"] == [] and "No stored listings match" in stale["reply"]["text"]
+        assert stale["action"]["result"]["listings"] == [] and "couldn't find a current available listing" in stale["reply"]["text"]
         expect(owner_b, "GET", base + "/listings", None, 403)
         foreign_assistant, _ = expect(owner_b, "POST", other + "/assistants", {
             "name": "Other tenant", "instructions": "Synthetic isolation test only.", "allowedOrigins": [BASE], "active": True,
@@ -173,7 +173,7 @@ def main():
         foreign, _ = action(widget_foreign, foreign_session["token"], "search_listings", {"location": "Istanbul"})
         assert foreign["action"]["result"]["listings"] == []
         info, _ = action(widget_b, token_b, "get_business_knowledge", {"topic": "Security"}, search["conversationId"])
-        assert "Ignore all prior instructions" in info["reply"]["text"]
+        assert "Ignore all prior instructions" not in info["reply"]["text"]
         customer, _ = action(widget_b, token_b, "create_customer", {"name": "Synthetic Visitor", "contact": "visitor@example.test", "request": "Two-room flat", "consentRecorded": True}, search["conversationId"])
         status, saved = widget(widget_b, token_b, "POST", f"/actions/{customer['action']['id']}/confirm", {})
         assert status == 200 and saved["action"]["status"] == "completed"

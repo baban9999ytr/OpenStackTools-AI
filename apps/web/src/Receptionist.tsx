@@ -3,11 +3,12 @@ import { api } from "./api";
 import { usePreferences } from "./preferences";
 
 type Window = { day: number; startMinute: number; endMinute: number };
-type Staff = { id: string; name: string; windows: Window[] };
+type Staff = { id: string; name: string; windows: Window[]; viewingEnabled?: boolean };
 type Config = { timeZone: string; openingHours: Window[]; staff: Staff[] };
 type Appointment = { _id: string; staffId: string; startAt: string; endAt: string; status: string };
 type Customer = { _id: string; name: string; contact: string; request: string; updatedAt: string };
-type Action = { _id: string; name: string; status: string; createdAt: string };
+type Action = { _id: string; name: string; status: string; createdAt: string;
+  result?: { listingTitle?: string; staffName?: string; startAt?: string; durationMinutes?: number } };
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const clock = (value: number) => `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 const minute = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
@@ -73,11 +74,14 @@ export function Receptionist({ organizationId, role }: { organizationId: string;
   }
   async function saveStaff(staff: Staff) {
     setBusy(true); setError("");
-    try { await api(`${base}/staff/${staff.id}/availability`, { method: "PUT", body: JSON.stringify({ windows: staff.windows }) }); setNotice(t("Staff availability saved.")); await load(); }
+    try { await api(`${base}/staff/${staff.id}/availability`, { method: "PUT", body: JSON.stringify({ windows: staff.windows, viewingEnabled: staff.viewingEnabled ?? false }) }); setNotice(t("Staff availability saved.")); await load(); }
     catch (caught) { setError(t(errorText(caught))); } finally { setBusy(false); }
   }
+  function clearTimes() {
+    setAvailable([]); setSelectedStart(""); setConfirmed(false);
+  }
   async function search(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setError(""); setAvailable([]); setSelectedStart("");
+    event.preventDefault(); setBusy(true); setError(""); clearTimes();
     try {
       const query = new URLSearchParams({ staffId, date, durationMinutes: String(durationMinutes) });
       const data = await api<{ available: typeof available }>(`${base}/availability?${query}`);
@@ -113,14 +117,14 @@ export function Receptionist({ organizationId, role }: { organizationId: string;
     </section>
     <section className="card"><h2>{t("Find appointment times")}</h2>
       <form onSubmit={search}>
-        <label>{t("Staff")}<select value={staffId} onChange={(event) => setStaffId(event.target.value)}>{config?.staff.map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}</select></label>
-        <label>{t("Date")}<input type="date" required value={date} onChange={(event) => setDate(event.target.value)} /></label>
-        <label>{t("Duration (minutes)")}<select value={durationMinutes} onChange={(event) => setDurationMinutes(Number(event.target.value))}>{[15,30,45,60,90,120].map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label>{t("Staff")}<select value={staffId} disabled={busy} onChange={(event) => { setStaffId(event.target.value); clearTimes(); }}>{config?.staff.map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}</select></label>
+        <label>{t("Date")}<input type="date" required value={date} disabled={busy} onChange={(event) => { setDate(event.target.value); clearTimes(); }} /></label>
+        <label>{t("Duration (minutes)")}<select value={durationMinutes} disabled={busy} onChange={(event) => { setDurationMinutes(Number(event.target.value)); clearTimes(); }}>{[15,30,45,60,90,120].map((value) => <option key={value}>{value}</option>)}</select></label>
         <button disabled={busy || !staffId}>{t("Check availability")}</button>
       </form>
       {available.length === 0 && <p className="muted">{t("No available times shown.")}</p>}
       {canAct && available.length > 0 && <form onSubmit={book}>
-        <label>{t("Available time")}<select required value={selectedStart} onChange={(event) => setSelectedStart(event.target.value)}><option value="">{t("Select a time")}</option>{available.map((slot) => <option key={slot.startAt} value={slot.startAt}>{new Date(slot.startAt).toLocaleString(locale, { timeZone, timeZoneName: "shortOffset" })}</option>)}</select></label>
+        <label>{t("Available time")}<select required value={selectedStart} onChange={(event) => { setSelectedStart(event.target.value); setConfirmed(false); }}><option value="">{t("Select a time")}</option>{available.map((slot) => <option key={slot.startAt} value={slot.startAt}>{new Date(slot.startAt).toLocaleString(locale, { timeZone, timeZoneName: "shortOffset" })}</option>)}</select></label>
         <label className="checkbox-label"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />{t("I confirm this booking")}</label>
         <button disabled={busy || !confirmed || !selectedStart}>{t("Book appointment")}</button>
       </form>}
@@ -130,14 +134,22 @@ export function Receptionist({ organizationId, role }: { organizationId: string;
         <WindowEditor value={hours} onChange={setHours} /><button disabled={busy}>{t("Save business hours")}</button></form>
     </section>}
     {canManage && <section className="card"><h2>{t("Staff availability")}</h2>
-      {config?.staff.map((staff) => <div key={staff.id}><h3>{staff.name}</h3><WindowEditor value={staff.windows} onChange={(windows) => setConfig((current) => current ? { ...current, staff: current.staff.map((item) => item.id === staff.id ? { ...item, windows } : item) } : current)} />
+      {config?.staff.map((staff) => <div key={staff.id}><h3>{staff.name}</h3>
+        <label className="checkbox-label"><input type="checkbox" checked={staff.viewingEnabled ?? false}
+          onChange={(event) => setConfig({ ...config, staff: config.staff.map((item) => item.id === staff.id ? { ...item, viewingEnabled: event.target.checked } : item) })} />{t("Can host property viewings")}</label>
+        <WindowEditor value={staff.windows} onChange={(windows) => setConfig((current) => current ? { ...current, staff: current.staff.map((item) => item.id === staff.id ? { ...item, windows } : item) } : current)} />
         <button disabled={busy} onClick={() => void saveStaff(staff)}>{t("Save availability")}</button></div>)}
     </section>}
     {canAct && <section className="card"><h2>{t("Customer requests")}</h2>{customers.length === 0 && <p className="muted">{t("No customer requests yet.")}</p>}
       {customers.map((item) => <div className="list-item" key={item._id}><strong>{item.name}</strong><span>{item.contact}</span><p>{item.request}</p></div>)}
     </section>}
     {canAct && <section className="card"><h2>{t("Action history")}</h2>{actions.length === 0 && <p className="muted">{t("No actions yet.")}</p>}
-      {actions.map((item) => <div className="list-item" key={item._id}><strong>{t(item.name)}</strong><span>{t(item.status)}</span><small>{new Date(item.createdAt).toLocaleString(locale)}</small></div>)}
+      {actions.map((item) => <div className="list-item" key={item._id}><strong>{t(item.name)}</strong><span>{t(item.status)}</span><small>{new Date(item.createdAt).toLocaleString(locale)}</small>
+        {["create_appointment", "reschedule_appointment", "cancel_appointment"].includes(item.name) && item.result?.startAt &&
+          <span>{[item.result.listingTitle, item.result.staffName,
+            new Date(item.result.startAt).toLocaleString(locale, { timeZone, timeZoneName: "shortOffset" }),
+            typeof item.result.durationMinutes === "number" ? `${item.result.durationMinutes} ${t("minutes")}` : undefined].filter(Boolean).join(" · ")}</span>}
+      </div>)}
     </section>}
   </div>;
 }

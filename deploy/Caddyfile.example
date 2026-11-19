@@ -3,6 +3,9 @@
 bots.openstacktool.com {
   encode zstd gzip
   reverse_proxy /api/* api:5000
-  reverse_proxy /health/* api:5000
+  header >Strict-Transport-Security "max-age=31536000"
+  @privateReady path /health/ready
+  respond @privateReady 404
+  reverse_proxy /health/live api:5000
   reverse_proxy web:5173
 }

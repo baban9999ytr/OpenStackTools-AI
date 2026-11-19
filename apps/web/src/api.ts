@@ -44,6 +44,12 @@ export type Message = {
   text: string;
   createdAt: string;
 };
+export type ConversationDetail = {
+  messages: Message[];
+  preferences?: { locations: string[]; rooms: number[]; budget?: number; currency?: string;
+    listingType?: string; propertyType?: string; budgetUnknown: boolean };
+  recentFailures?: Array<{ category: "budget" | "rate_limit" | "configuration" | "provider" | "incomplete"; createdAt: string }>;
+};
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}/api${path}`, {
     ...init,

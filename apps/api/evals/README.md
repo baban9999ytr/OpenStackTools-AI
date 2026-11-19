@@ -45,3 +45,19 @@ npm run eval:benchmark -w apps/api -- --suite=luna-smoke
 The smoke defaults to output profile `standard` and reasoning `none`. The full comparison still defaults to `minimal` and `medium`. Use `EVAL_OUTPUT_PROFILE=minimal|standard|extended|complex` for 128, 512, 1,024 or 2,048 output tokens and `EVAL_REASONING_EFFORT` for a supported effort within the medium policy ceiling. These settings are evaluation-only.
 
 The Luna live preflight uses the same `--suite=luna-smoke` option on `eval:live`, with `EVAL_PREFLIGHT_ONLY=1`. In addition to the shared flags, it checks the dedicated project spending review attestation, a private report destination, full call envelope and synthetic queue. It writes no files and constructs no provider client. For optional rehearsal output, supply a new `EVAL_REPORT_PATH` for JSON and its paired Markdown transcript. See the exact approval and execution sequence, cost calculations and review rubric in the [Phase 2E report](../../../ASTRA_PHASE_2E_LIVE_VERIFICATION_PREPARATION.md).
+
+## Phase 2F conversation quality
+
+Use `npm run eval:benchmark -w apps/api -- --suite=conversation-quality` for the offline Turkish-first corpus. It preserves the raw simulated proposal and the executed action separately and reports application, fixture-model and delivered-reply denominators. This suite rejects `--live`. See the [evaluation plan](../../../ASTRA_PHASE_2F_EVALUATION_PLAN.md) for the rubric and interpretation limits.
+
+### Phase 2F nine-call subset
+
+The offline `--suite=luna-quality` command rehearses the nine planned Luna calls and one deterministic setup turn. The secure launcher supports provider-free preflight for this suite. Its paid path requires separate Phase 2F authorization and the `EVAL_2F_EXECUTE_APPROVED=1` flag in addition to the existing gates. [Envelope and operator commands](../../../ASTRA_PHASE_2F_MILESTONE_B_LIVE_READINESS.md)
+
+## Phase 2G recorded decision replay
+
+Run `EVAL_OUTPUT_PROFILE=standard npm run eval:benchmark -w apps/api -- --suite=phase2g-replay` from the repository root. The runner uses a disposable MongoDB replica set and the nine frozen synthetic provider decisions. The historical Phase 2F reports retain their strict metrics. The replay checks semantic contact arguments, stored alternatives, current listing references and final reply completeness independently of whether the raw proposal was suitable. This suite rejects `--live`.
+
+## Phase 2G Milestone B
+
+Run `npm run eval:benchmark -w apps/api -- --suite=phase2g-live` for the provider-free eight-turn rehearsal. It uses seven fixture decisions and a deterministic inventory setup, with a separately seeded contact prelude. For a private rehearsal pair, set `EVAL_REPORT_PATH` to a new absolute JSON path in an operator-owned mode 0700 directory. The launcher preflight validates the configured project attestations and creates no report files. The approved live path requires a separate `EVAL_2G_EXECUTE_APPROVED=1` gate. See [Milestone B readiness](../../../ASTRA_PHASE_2G_MILESTONE_B_LIVE_READINESS.md).

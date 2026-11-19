@@ -88,3 +88,68 @@ test("confirmed action replies follow the widget session language", () => {
   assert.match(actionReply({ name: "create_appointment", status: "completed", locale: "tr", result: { appointmentId: "123" } }), /Randevunuz oluşturuldu/);
   assert.match(actionReply({ name: "create_appointment", status: "pending", locale: "en" }), /No booking has been made/);
 });
+
+test("Responses failures expose bounded diagnostics and never retry at the SDK boundary", async () => {
+  const { createOpenAIResponder, providerFailureDiagnostics } = await import("../src/services/ai.js");
+  const secret = "private marker never serialize";
+  const fixture = { object: "response", model: "gpt-6-luna", status: "completed", output: [],
+    usage: { input_tokens: 20, output_tokens: 3 } };
+  const cases = [
+    { fetch: async () => Response.json({ error: { message: secret, code: secret } }, { status: 503, headers: { "x-request-id": secret } }),
+      diagnostic: { reason: "provider_unavailable", category: "http_server_error", status: 503 } },
+    ...([
+      [400, "provider_rejected", "http_client_error"],
+      [401, "provider_rejected", "http_authentication"],
+      [403, "provider_rejected", "http_permission"],
+      [404, "provider_model_unavailable", "http_not_found"],
+      [409, "provider_unavailable", "http_client_error"],
+      [422, "provider_rejected", "http_client_error"],
+    ] as const).map(([status, reason, category]) => ({
+      fetch: async () => Response.json({ error: { message: secret } }, { status }),
+      diagnostic: { reason, category, status },
+    })),
+    { fetch: async () => Response.json({ error: { message: secret } }, { status: 429 }),
+      diagnostic: { reason: "provider_rate_limited", category: "http_rate_limit", status: 429 } },
+    { fetch: async () => Response.json({ error: { message: secret } }, { status: 408 }),
+      diagnostic: { reason: "provider_unavailable", category: "http_request_timeout", status: 408 } },
+    { fetch: async () => { throw new TypeError(secret); },
+      diagnostic: { reason: "provider_unavailable", category: "network_error" } },
+    { fetch: async () => { throw new DOMException(secret, "AbortError"); },
+      diagnostic: { reason: "provider_unavailable", category: "network_timeout" } },
+    { fetch: async () => new Response(secret, { headers: { "Content-Type": "application/json" } }),
+      diagnostic: { reason: "provider_unavailable", category: "response_invalid_json", status: 200 } },
+    { fetch: async () => Response.json({ ...fixture, output: null }),
+      diagnostic: { reason: "provider_unavailable", category: "response_decode_failure", status: 200 } },
+    { fetch: async () => Response.json({ ...fixture, model: null }),
+      diagnostic: { reason: "provider_unavailable", category: "response_invalid_shape", status: 200 } },
+    { fetch: async () => Response.json({ ...fixture, output: [{ type: "function_call", name: "search_listings", arguments: secret }] }),
+      diagnostic: { reason: "provider_unavailable", category: "response_invalid_tool_call", status: 200 } },
+    { fetch: async () => Response.json({ ...fixture, usage: null }),
+      diagnostic: { reason: "provider_unavailable", category: "response_invalid_usage", status: 200 } },
+    { fetch: async () => Response.json({ ...fixture, model: secret }),
+      diagnostic: { reason: "provider_unavailable", category: "response_model_mismatch", status: 200 } },
+    { fetch: async () => Response.json({ ...fixture, service_tier: "priority" }),
+      diagnostic: { reason: "provider_unavailable", category: "response_tier_mismatch", status: 200 } },
+    { fetch: async () => Response.json(fixture),
+      diagnostic: { reason: "provider_unavailable", category: "response_empty", status: 200 } },
+    { fetch: async () => Response.json({ ...fixture, status: "incomplete", incomplete_details: { reason: "max_output_tokens" } }),
+      diagnostic: { reason: "max_output_tokens", category: "response_incomplete", status: 200,
+        reportedUsage: { inputTokens: 20, outputTokens: 3, reasoningTokens: 0, cachedInputTokens: 0 } } },
+  ];
+  for (const { fetch, diagnostic } of cases) {
+    const mock = test.mock.fn<typeof globalThis.fetch>(fetch);
+    const responder = createOpenAIResponder({ model: "gpt-6-luna", endpoint: "responses",
+      apiKey: "inert-fixture", maxCompletionTokens: 512, fetch: mock });
+    await assert.rejects(responder("Synthetic instructions", []), (error: unknown) => {
+      const actual = providerFailureDiagnostics(error);
+      assert.deepEqual(actual, diagnostic);
+      assert.doesNotMatch(JSON.stringify(actual), /private marker/);
+      return true;
+    }, diagnostic.category);
+    assert.equal(mock.mock.callCount(), 1, diagnostic.category);
+  }
+  for (const status of [399.5, "503", null, Infinity, 600]) {
+    assert.deepEqual(providerFailureDiagnostics({ status, code: secret, message: secret }),
+      { reason: "provider_unavailable", category: "unknown_error" });
+  }
+});

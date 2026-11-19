@@ -1,4 +1,5 @@
-import type { Types } from "mongoose";
+import { displayedListingIds, type VerifiedListing } from "./customer-listings.js";
+import { Types } from "mongoose";
 import { stageAction, actionReply } from "./agent-actions.js";
 import { businessStateSchema, businessFilters, mergeBusinessState, realEstateFollowUp, type extractBusinessTurn, type BusinessState } from "./business-conversation.js";
 
@@ -19,9 +20,9 @@ export async function composeBusinessTurn(context: { organizationId: Types.Objec
     ? "Telefon numaranızı paylaşmanız gerekmiyor. Buradan devam edebiliriz."
     : "You do not need to share your phone number. We can continue here." };
   const previous = businessStateSchema.safeParse(prior).data;
-  const searchChange = Object.entries(turn.updates).some(([field, entry]) => field !== "name" &&
+  const searchChange = turn.clearLocation || turn.clearRooms || Object.keys(turn.alternatives).length > 0 || Object.entries(turn.updates).some(([field, entry]) => field !== "name" &&
     previous?.values[field as keyof BusinessState["values"]]?.value !== entry?.value);
-  if (turn.withdrawBudget && !turn.topicChange) {
+  if (turn.withdrawBudget && !searchChange && !turn.topicChange) {
     if (!previous?.values.budget || state.refused.includes("budget"))
       return { state, text: tr ? "Aramaya bir bütçe sınırı olmadan devam edebiliriz." : "We can continue without a budget limit." };
     const follow = realEstateFollowUp(state, context.locale, 0);
@@ -34,22 +35,29 @@ export async function composeBusinessTurn(context: { organizationId: Types.Objec
   let answer = "";
   let actionId: Types.ObjectId | undefined;
   let matches = 0;
+  let displayed: Types.ObjectId[] | undefined;
   if (filters) {
     const action = await stageAction(context, { name: "search_listings", arguments: filters }, `business:${requestId}:search`);
-    matches = ((action.result as { listings?: unknown[] })?.listings ?? []).length;
+    const listings = (action.result as { listings?: VerifiedListing[] })?.listings ?? [];
+    matches = listings.length;
     actionId = action._id;
     answer = actionReply(action, { responseLength: "short" });
+    if (listings.length) displayed = displayedListingIds(answer, listings).map((id) => new Types.ObjectId(id));
     // Preferences aren't facts: the schema cannot certify these attributes.
     if (state.values.furnished || state.values.balcony) answer += tr
-      ? " Eşya ve balkon tercihlerinizi not aldım; bu özellikler için doğrulanmış alanlar bulunmadığından tam uygunluklarını teyit edemiyorum."
+      ? ` ${state.values.furnished?.value === false ? "Eşyasız tercihinizi" : state.values.furnished ? "Eşyalı tercihinizi" : "Balkon tercihinizi"} not aldım. Bu özellikleri kayıtlardan teyit edemiyorum.`
       : "I've noted your furnishing and balcony preferences; these attributes are not verified, so I cannot confirm a complete match.";
   }
   const follow = realEstateFollowUp(state, context.locale, matches);
+  if (turn.budgetUnknown && !state.values.listingType && Object.keys(turn.alternatives).length)
+    return { state: follow.state, text: tr
+      ? `Her iki semti ve oda seçeneğini not aldım. Şimdilik bütçe sınırı koymayalım. ${follow.text}`
+      : `I noted both locations and room options. We can leave the budget open for now. ${follow.text}` };
   state = follow.state as BusinessState;
   const acknowledgement = turn.correction ? tr ? "Tercihinizi güncelledim. " : "I've updated your preference. " : "";
   const fallback = tr ? "Tercihlerinizi not aldım. İsterseniz bir ekip üyesinden yardım isteyebilirsiniz."
     : "I've noted your preferences. You can ask for a team member if you wish.";
-  return { state, actionId, text: acknowledgement + [answer, follow.text].filter(Boolean).join(" ") || fallback };
+  return { state, actionId, displayedListingIds: displayed, text: acknowledgement + [answer, follow.text].filter(Boolean).join(" ") || fallback };
 }
 
 export function viewingFollowUp(text: string, state: BusinessState, locale: "en" | "tr", hasVerifiedListing: boolean) {

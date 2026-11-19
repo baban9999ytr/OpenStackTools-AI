@@ -11,15 +11,21 @@ export const flexibleDatePlan = (text: string, zone: string, at: Date, priorDate
   const notEarly = /sabah erken olmasın|not early (?:in the )?morning/i.test(text);
   const window = requestedAppointmentWindow(text, zone, at);
   const periodOnly = /(?:öğleden sonra|afternoon).{0,25}(?:herhangi|any|olur)/i.test(text);
-  if (!any && !week && !excludeTomorrow && !notEarly && !periodOnly && !window.period) return null;
+  const weekend = /hafta\s*sonu|weekend/i.test(text);
+  if (!weekend && !any && !week && !excludeTomorrow && !notEarly && !periodOnly && !window.period) return null;
   if (/(?:sabah|morning).{0,30}(?:yalnızca|only).{0,30}(?:öğleden sonra|afternoon)|(?:öğleden sonra|afternoon).{0,30}(?:yalnızca|only).{0,30}(?:sabah|morning)/i.test(text))
     return { dates: [], startMinute: 0, endMinute: 1440, needsClarification: true };
   const explicitDates = requestedAppointmentDates(text, zone, at);
   let dates = excludeTomorrow ? [add(2), add(3)] : explicitDates;
-  if (!dates.length && priorDate && !any && !week) dates = [priorDate];
-  if (!dates.length) dates = Array.from({ length: week ? 7 - ((local.day + 6) % 7) : 7 }, (_, i) => add(i));
+  if (weekend && dates.length) dates = dates.filter((date) => [0, 6].includes(new Date(`${date}T12:00:00Z`).getUTCDay()));
+  if (weekend && !explicitDates.length && !dates.length) {
+    const saturday = (6 - local.day + 7) % 7;
+    dates = local.day === 0 ? [local.date] : [add(saturday), add(saturday + 1)];
+  }
+  if (!weekend && !dates.length && priorDate && !any && !week) dates = [priorDate];
+  if (!weekend && !dates.length) dates = Array.from({ length: week ? 7 - ((local.day + 6) % 7) : 7 }, (_, i) => add(i));
   // A named weekday can resolve to exactly one week ahead when today has that weekday.
-  const horizon = add(explicitDates.length ? 7 : 6);
+  const horizon = add(explicitDates.length || weekend ? 7 : 6);
   dates = dates.filter((date) => date >= local.date && date <= horizon).slice(0, 7);
   // “Not early” has no universal numeric meaning. Ask rather than inventing a preference.
   return { dates, startMinute: window.startMinute ?? 0, endMinute: window.endMinute ?? 1440,

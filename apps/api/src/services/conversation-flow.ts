@@ -19,8 +19,16 @@ export const selectedListingFromText = (text: string, listings: VerifiedListing[
     return title.length >= 8 && lower.includes(title);
   });
   if (byTitle.length === 1) return byTitle[0];
-  if (/(?:^|\s)(?:first|1st|ilkini|birincisini|ilk daireyi|ilk daire|ilk ilanı)(?=\s|[,.!?]|$)/i.test(lower)) return listings[0];
-  if (/(?:^|\s)(?:second|2nd|ikincisini|ikinci daireyi|ikinci daire|ikinci ilanı)(?=\s|[,.!?]|$)/i.test(lower)) return listings[1];
+  if (byTitle.length > 1) return undefined;
+  const first = /(?:^|\s)(?:first|1st|ilkini|birincisini|(?:ilk|birinci) (?:daire|ilan)\p{L}*|(?:ilk|birinci) ev(?:in|i|de|den)?)(?=\s|[,.!?]|$)/iu.test(lower);
+  const second = /(?:^|\s)(?:second|2nd|ikincisini|ikinci (?:daire|ilan)\p{L}*|ikinci ev(?:in|i|de|den)?)(?=\s|[,.!?]|$)/iu.test(lower);
+  if (first || second) return first && second ? undefined : listings[first ? 0 : 1];
+  if (/ucuz olan|cheaper one|cheapest/i.test(lower) &&
+      listings.every((item) => Number.isFinite(item.price) && item.currency === listings[0]?.currency)) {
+    const cheapest = Math.min(...listings.map((item) => item.price));
+    const matching = listings.filter((item) => item.price === cheapest);
+    return matching.length === 1 ? matching[0] : undefined;
+  }
   return undefined;
 };
 

@@ -57,6 +57,11 @@ jobs:
           npm run eval:deterministic -w apps/api
           npm run eval:benchmark -w apps/api
           npm run eval:benchmark -w apps/api -- --suite=luna-smoke
+          npm run eval:benchmark -w apps/api -- --suite=conversation-quality
+          EVAL_OUTPUT_PROFILE=standard npm run eval:benchmark -w apps/api -- --suite=phase2g-replay
+          npm run eval:benchmark -w apps/api -- --suite=phase2g-milestone-c
+          npm run eval:benchmark -w apps/api -- --suite=luna-quality
+          npm run eval:benchmark -w apps/api -- --suite=phase2g-live
       - name: Install Chromium
         run: npm exec --workspace apps/web -- playwright install --with-deps chromium
       - name: Browser tests

@@ -13,6 +13,7 @@ export const env = {
   sessionSecret: must("SESSION_SECRET"),
   openaiApiKey: must("OPENAI_API_KEY"),
   openaiModel: must("OPENAI_MODEL"),
+  experimentalReceptionistIntents: process.env.AI_EXPERIMENTAL_RECEPTIONIST_INTENTS === "true",
   reasoningEffort: process.env.OPENAI_REASONING_EFFORT?.trim() || undefined,
   maxCompletionTokens: Number(process.env.OPENAI_MAX_COMPLETION_TOKENS ?? 800),
   automaticMaxRequestMicros: process.env.AI_AUTOMATIC_MAX_REQUEST_USD

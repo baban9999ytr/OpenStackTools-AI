@@ -7,6 +7,8 @@ import { validate } from "../middleware/validate.js";
 import { ActionError, actionReply, confirmAction, parseAction } from "../services/agent-actions.js";
 import { AppointmentError, checkAvailability, durationSchema, timeZoneSchema, windowsSchema } from "../services/appointments.js";
 
+import { propertyViewingServicePattern, staffCanShowProperty } from "../services/appointment-language.js";
+
 const router = Router();
 router.use(requireUser);
 const id = z.string().refine(mongoose.isValidObjectId);
@@ -29,6 +31,7 @@ router.get("/:organizationId/receptionist/config", requireMembership(["owner", "
     staff: members.map((member) => ({ id: member.userId, name: users.find((user) => user._id.equals(member.userId))?.name ?? "Staff",
       windows: schedules.find((schedule) => schedule.staffId.equals(member.userId))?.windows ?? [],
       services: schedules.find((schedule) => schedule.staffId.equals(member.userId))?.services ?? [],
+      viewingEnabled: staffCanShowProperty(schedules.find((schedule) => schedule.staffId.equals(member.userId))?.services ?? []),
       appointmentDurationsMinutes: schedules.find((schedule) => schedule.staffId.equals(member.userId))?.appointmentDurationsMinutes ?? [15, 30, 45, 60, 90, 120],
     })),
   });
@@ -39,14 +42,17 @@ router.patch("/:organizationId/receptionist/hours", requireMembership(["owner", 
     res.json({ timeZone: req.body.timeZone, openingHours: req.body.openingHours });
   });
 router.put("/:organizationId/receptionist/staff/:staffId/availability", requireMembership(["owner", "admin"]),
-  validate(z.strictObject({ windows: windowsSchema })), async (req, res) => {
+  validate(z.strictObject({ windows: windowsSchema, viewingEnabled: z.boolean().optional() })), async (req, res) => {
     if (typeof req.params.staffId !== "string" || !mongoose.isValidObjectId(req.params.staffId)) { res.status(400).json({ error: "Invalid staff" }); return; }
     const member = await Membership.exists({ organizationId: res.locals.organizationId, userId: req.params.staffId,
       role: { $in: ["owner", "admin", "agent"] },
     });
     if (!member) { res.status(404).json({ error: "Staff unavailable" }); return; }
     const schedule = await StaffAvailability.findOneAndUpdate({ organizationId: res.locals.organizationId, staffId: req.params.staffId },
-      { $set: { windows: req.body.windows } }, { upsert: true, returnDocument: "after" });
+      { $set: { windows: req.body.windows },
+        ...(req.body.viewingEnabled === true ? { $addToSet: { services: "property viewing" } } : {}),
+        ...(req.body.viewingEnabled === false ? { $pull: { services: propertyViewingServicePattern } } : {}),
+      }, { upsert: true, returnDocument: "after" });
     res.json({ staffId: schedule.staffId, windows: schedule.windows });
   });
 router.get("/:organizationId/receptionist/availability", requireMembership(["owner", "admin", "agent", "viewer"]), async (req, res) => {

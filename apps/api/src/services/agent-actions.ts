@@ -33,7 +33,7 @@ export const actionSchemas = {
 export type ActionName = keyof typeof actionSchemas;
 export type ActionCall = { name: ActionName; arguments: unknown };
 export const parseAction = (name: string, args: unknown): ActionCall => {
-  if (!(name in actionSchemas)) throw new ActionError("invalid_action");
+  if (!Object.hasOwn(actionSchemas, name)) throw new ActionError("invalid_action");
   const schema = actionSchemas[name as ActionName] as z.ZodType;
   const parsed = schema.safeParse(args);
   if (!parsed.success) throw new ActionError("invalid_arguments");
@@ -296,11 +296,21 @@ export const actionReply = (action: { name: string; status: string; result?: unk
   if (action.name === "get_business_knowledge") {
     const result = action.result as Record<string, unknown> | undefined;
     if (!result) return tr ? "Bu konuda doğrulanmış işletme bilgisi bulamadım. Hangi ayrıntıyı öğrenmek istersiniz?" : "I couldn't find verified business information about that. Which detail would help?";
+    const contact = result.contact as { email?: string; website?: string; phone?: string; address?: string } | undefined;
+    const contactLines = [
+      contact?.email && (tr ? `Bize ${contact.email} adresinden yazabilirsiniz.` : `You can email us at ${contact.email}.`),
+      contact?.website && (tr ? `Web sitemiz ${contact.website}` : `Our website is ${contact.website}`),
+      contact?.phone && (tr ? `Bizi ${contact.phone} numarasından arayabilirsiniz.` : `You can call us at ${contact.phone}.`),
+      contact?.address && (tr ? `Adresimiz ${contact.address}.` : `Our address is ${contact.address}.`),
+    ].filter(Boolean);
+    if (contactLines.length && Object.entries(result).every(([key, value]) =>
+      key === "contact" || key === "timeZone" || !value || Array.isArray(value) && value.length === 0))
+      return contactLines.join(" ");
     const lines = [result.profile, ...(result.services as Array<{ name: string; description: string; price: string }> ?? []).map((item) => `${item.name}: ${item.description}${item.price ? ` — ${item.price}` : ""}`),
       ...(result.faqs as Array<{ question: string; answer: string }> ?? []).map((item) => `${item.question}: ${item.answer}`),
       ...(result.policies as Array<{ title: string; text: string }> ?? []).map((item) => `${item.title}: ${item.text}`),
       ...(result.facts as Array<{ label: string; value: string }> ?? []).map((item) => `${item.label}: ${item.value}`),
-      ...((result.contact && typeof result.contact === "object") ? Object.entries(result.contact as Record<string, string>).filter(([, value]) => value).map(([key, value]) => `${key}: ${value}`) : []),
+      ...contactLines,
       ...((result.openingHours as Array<{ day: number; startMinute: number; endMinute: number }> ?? []).map((item) => `${tr ? "Gün" : "Day"} ${item.day}: ${String(Math.floor(item.startMinute / 60)).padStart(2, "0")}:${String(item.startMinute % 60).padStart(2, "0")}-${String(Math.floor(item.endMinute / 60)).padStart(2, "0")}:${String(item.endMinute % 60).padStart(2, "0")}`)),
     ].filter((item): item is string => typeof item === "string" && item.length > 0);
     if (lines.length) {

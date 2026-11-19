@@ -33,3 +33,15 @@ Each candidate receives the same medium reasoning setting and 128 output-token c
 3. Run `EVAL_PREFLIGHT_ONLY=1 npm run eval:live -w apps/api` to validate local admission. This command exits before opening the report, starting the replica set or constructing the provider client. Entitlement remains an operator attestation.
 4. After separate authorization for billable requests, unset `EVAL_PREFLIGHT_ONLY`, set `EVAL_EXECUTE_APPROVED=1` and run the live command. Use a new private report path. The isolated application sets both tenant budget windows to the per-model cap. It also enforces the configured request count, a conservative 40,000-input-token bound, 128 maximum output tokens and the SDK's 30-second timeout.
 5. Compare identical customer turns and note any model-visible history divergence. Reconcile reported token totals and uncertain reservations against the dedicated project invoice. Keep automated assertions separate from human judgments. Review rubric and capability verification are in the [comparison report](../../../ASTRA_MODEL_COMPARISON_REPORT.md).
+
+## Luna-only Phase 2E smoke
+
+Run the simulated smoke through the same queue with:
+
+```bash
+npm run eval:benchmark -w apps/api -- --suite=luna-smoke
+```
+
+The smoke defaults to output profile `standard` and reasoning `none`. The full comparison still defaults to `minimal` and `medium`. Use `EVAL_OUTPUT_PROFILE=minimal|standard|extended|complex` for 128, 512, 1,024 or 2,048 output tokens and `EVAL_REASONING_EFFORT` for a supported effort within the medium policy ceiling. These settings are evaluation-only.
+
+The Luna live preflight uses the same `--suite=luna-smoke` option on `eval:live`, with `EVAL_PREFLIGHT_ONLY=1`. In addition to the shared flags, it checks the dedicated project spending review attestation, a private report destination, full call envelope and synthetic queue. It writes no files and constructs no provider client. For optional rehearsal output, supply a new `EVAL_REPORT_PATH` for JSON and its paired Markdown transcript. See the exact approval and execution sequence, cost calculations and review rubric in the [Phase 2E report](../../../ASTRA_PHASE_2E_LIVE_VERIFICATION_PREPARATION.md).

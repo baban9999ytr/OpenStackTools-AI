@@ -62,15 +62,17 @@ export const maximumReservationMicros = (
   instructions: string,
   history: Turn[],
   configuration?: EffectiveModel,
-) => {
-  const upperInputTokens = upperInputTokenBound(instructions, history);
+  maxOutputTokens = MAX_COMPLETION_TOKENS,
+) => reservationForTokenBounds(upperInputTokenBound(instructions, history), maxOutputTokens, configuration);
+
+export const reservationForTokenBounds = (upperInputTokens: number, maxOutputTokens: number, configuration?: EffectiveModel) => {
   if (!Number.isSafeInteger(upperInputTokens))
     throw new Error("Context too large");
   if (configuration?.mode === "product" && upperInputTokens > 272_000)
     throw new Error("Context exceeds verified short-context pricing boundary");
   // A cache write can cost more than ordinary input. Reserve for that worst
   // case; three microdollars cover per-category rounding on settlement.
-  return measuredCostMicros(upperInputTokens, MAX_COMPLETION_TOKENS, {}, configuration) + 3;
+  return measuredCostMicros(upperInputTokens, maxOutputTokens, {}, configuration) + 3;
 };
 
 export async function remainingOrganizationBudget(organizationId: mongoose.Types.ObjectId, daily: number, monthly: number) {

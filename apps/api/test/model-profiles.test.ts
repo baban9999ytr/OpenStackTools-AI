@@ -97,3 +97,31 @@ test("product modes require verified access, valid prices and effective reasonin
     delete process.env.AI_VERIFIED_MODELS;
   }
 });
+
+test("evaluation profile cap reaches Responses and incomplete output never yields a tool call", async () => {
+  const { IncompleteModelResponse } = await import("../src/services/ai.js");
+  const { reservationForTokenBounds } = await import("../src/services/budget.js");
+  const { outputProfiles } = await import("../evals/benchmark-smoke.js");
+  const luna = resolveModel({ mode: "preset", profile: "economical" });
+  const expected = [10067, 10259, 10515, 11027];
+  for (const [index, cap] of Object.values(outputProfiles).entries()) {
+    assert.equal(reservationForTokenBounds(40_000, cap, luna), expected[index]);
+    const mock = test.mock.fn<typeof fetch>(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.max_output_tokens, cap);
+      assert.equal(body.reasoning.effort, "low");
+      assert.equal(body.model, "gpt-6-luna");
+      assert.equal(body.store, false);
+      return Response.json({ id: "synthetic-incomplete", model: "gpt-6-luna", status: "incomplete",
+        incomplete_details: { reason: "max_output_tokens" },
+        output: [{ type: "function_call", name: "create_appointment", arguments: "{}" }],
+        usage: { input_tokens: 200, output_tokens: cap, output_tokens_details: { reasoning_tokens: cap } } });
+    });
+    const responder = createOpenAIResponder({ model: luna.model, reasoningEffort: "low", maxCompletionTokens: cap,
+      apiKey: "inert-fixture", endpoint: "responses", fetch: mock });
+    await assert.rejects(responder("Synthetic test", [{ role: "customer", text: "Hello" }]),
+      (error) => error instanceof IncompleteModelResponse && error.reason === "max_output_tokens" &&
+        error.reportedUsage?.reasoningTokens === cap);
+    assert.equal(mock.mock.callCount(), 1);
+  }
+});

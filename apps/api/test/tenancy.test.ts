@@ -806,6 +806,23 @@ test("provider 429 is retried once without uncertain billing", async () => {
   assert.equal(usage?.usageBreakdownKnown, true);
 });
 
+test("evaluation queue terminates rejected requests without requeue or masked inventory", async () => {
+  const conversation = await Conversation.create({ organizationId: orgA, assistantId, visitorId: "synthetic-no-replay" });
+  const queued = await WidgetRequest.create({ organizationId: orgA, assistantId, conversationId: conversation._id,
+    visitorId: "synthetic-no-replay", clientMessageId: crypto.randomUUID(), locale: "en", text: "Which listings are available?" });
+  const { processWidgetRequest } = await import("../src/services/widget-queue.js");
+  const responder = test.mock.fn(async () => { throw Object.assign(new Error("fixture rate limit"), { status: 429 }); });
+  await processWidgetRequest(queued._id, responder, { maxOutputTokens: 1024, retryProviderFailures: false });
+  await processWidgetRequest(queued._id, responder, { maxOutputTokens: 1024, retryProviderFailures: false });
+  assert.equal(responder.mock.callCount(), 1);
+  const result = await WidgetRequest.findById(queued._id).lean();
+  assert.equal(result?.status, "failed");
+  assert.equal(result?.errorCode, "provider_rate_limited");
+  assert.equal(result?.reservedMicros, 0);
+  assert.equal(result?.responseMessageId, undefined);
+  assert.equal(await UsageEvent.countDocuments({ requestId: queued._id }), 0);
+});
+
 test("unavailable model returns a generic error without replay or cost", async () => {
   const started = await request(app)
     .post("/api/widget/sessions")

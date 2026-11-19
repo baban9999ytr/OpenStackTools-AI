@@ -56,6 +56,7 @@ jobs:
         run: |
           npm run eval:deterministic -w apps/api
           npm run eval:benchmark -w apps/api
+          npm run eval:benchmark -w apps/api -- --suite=luna-smoke
       - name: Install Chromium
         run: npm exec --workspace apps/web -- playwright install --with-deps chromium
       - name: Browser tests

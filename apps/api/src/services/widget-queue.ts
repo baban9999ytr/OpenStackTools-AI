@@ -490,6 +490,7 @@ const finalizeSuccess = async (
 export const processWidgetRequest = async (
   requestId: mongoose.Types.ObjectId,
   respond: AIResponder,
+  execution: { maxOutputTokens?: number; retryProviderFailures?: boolean } = {},
 ) => {
   const request = await WidgetRequest.findOne({
     _id: requestId,
@@ -1198,8 +1199,8 @@ export const processWidgetRequest = async (
       ? configuredModels().filter((id) => orgAllowed.includes(id)) : configuredModels(),
     (organization?.maxReasoningEffort ?? configuredMaxEffort()) as Effort);
     respond = respond.forModel?.(configuration) ?? respond;
-    const reservation = maximumReservationMicros(fullInstructions, history, configuration) +
-      (respond.synthesize ? maximumReservationMicros(`${fullInstructions}\n${"x".repeat(8000)}`, history, configuration) : 0);
+    const reservation = maximumReservationMicros(fullInstructions, history, configuration, execution.maxOutputTokens) +
+      (respond.synthesize ? maximumReservationMicros(`${fullInstructions}\n${"x".repeat(8000)}`, history, configuration, execution.maxOutputTokens) : 0);
     if (assistant.modelSelection?.mode === "product" && assistant.modelSelection.choice === "automatic") {
       // The application has no approval or evidence store yet. No request or environment flag can override this gate.
       const readOnly = ["attribute", "recommend", "sort", "reference", "broaden", "search"].includes(followUpIntent) &&
@@ -1461,7 +1462,7 @@ export const processWidgetRequest = async (
       await finalizeFailure(
         requestId,
         policy.code,
-        policy.retry,
+        policy.retry && execution.retryProviderFailures !== false,
         policy.uncertain,
       );
     }

@@ -8,10 +8,30 @@ export type Assistant = {
   _id: string;
   name: string;
   instructions: string;
+  responseLength?: "short" | "balanced" | "detailed";
+  modelSelection?: ModelSelection;
+  conversationStrategy?: "reactive" | "real_estate";
+  settingsVersion?: number;
+  defaultLanguage?: "auto" | "tr" | "en";
+  tone?: "warm" | "formal" | "friendly" | "concise" | "concierge";
+  greetingStyle?: "brief" | "standard";
+  emojiUsage?: "none" | "minimal";
+  bookingNameRequired?: boolean;
+  defaultAppointmentDurationMinutes?: 15 | 30 | 45 | 60 | 90 | 120;
   publicKey: string;
   allowedOrigins: string[];
   active: boolean;
 };
+export type ModelId = "gpt-6-luna" | "gpt-6.1-terra" | "gpt-6.1-sol";
+export type Profile = "economical" | "balanced" | "advanced";
+export type ProductMode = "normal" | "powerful" | "very_powerful" | "automatic";
+export type ModelSelection = { mode: "product"; choice: ProductMode; profile?: never } | { mode: "preset"; profile: Profile } | {
+  mode: "custom"; profile: Profile; model: ModelId;
+  reasoningEffort: "none" | "low" | "medium" | "high" | "xhigh" | "max";
+  processingTier: "default" };
+export type ModelOptions = { productModes?: Array<{ choice: ProductMode; model: string; available: boolean; reason: string; reasoningEffort: string }>; models: Record<ModelId, { name: string; efforts: string[]; defaultEffort: string;
+  tiers: string[]; prices: { input: number; output: number } }>;
+  enabled: ModelId[]; maxReasoningEffort: string; pricingVersion: string; pricingSource: string; defaultSelection: ModelSelection };
 export type Conversation = {
   _id: string;
   assistantId: string;

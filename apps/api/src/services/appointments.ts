@@ -57,6 +57,7 @@ const bookableInSchedule = (schedule: Awaited<ReturnType<typeof loadSchedule>>, 
   const start = localParts(startAt, timeZone);
   const end = localParts(endAt, timeZone);
   return start.date === end.date &&
+    (schedule.availability.appointmentDurationsMinutes?.length ? schedule.availability.appointmentDurationsMinutes.includes(durationMinutes) : true) &&
     within(schedule.organization.openingHours ?? [], start.day, start.minute, end.minute) &&
     within(schedule.availability.windows ?? [], start.day, start.minute, end.minute);
 };
@@ -70,16 +71,25 @@ export const assertBookable = async (organizationId: mongoose.Types.ObjectId, st
   return { endAt, timeZone: schedule.organization.timeZone ?? "UTC" };
 };
 
-export const checkAvailability = async (organizationId: mongoose.Types.ObjectId, staffId: mongoose.Types.ObjectId, date: string, durationMinutes: number) => {
+export const checkAvailability = async (organizationId: mongoose.Types.ObjectId, staffId: mongoose.Types.ObjectId, date: string, durationMinutes: number,
+  requestedWindow?: { startMinute: number; endMinute: number }, now = new Date()) => {
   const parsedDate = new Date(`${date}T00:00:00Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date) throw new AppointmentError("invalid_time");
   const candidates: Date[] = [];
+  if (requestedWindow && (!Number.isInteger(requestedWindow.startMinute) || !Number.isInteger(requestedWindow.endMinute) ||
+    requestedWindow.startMinute < 0 || requestedWindow.endMinute > 1440 || requestedWindow.startMinute >= requestedWindow.endMinute ||
+    requestedWindow.startMinute % 15 !== 0 || requestedWindow.endMinute % 15 !== 0)) throw new AppointmentError("invalid_time");
   const anchor = parsedDate.getTime();
   const schedule = await loadSchedule(organizationId, staffId);
   for (let offset = -14 * 60; offset < 38 * 60; offset += 15) {
     const startAt = new Date(anchor + offset * 60_000);
     if (localParts(startAt, schedule.organization.timeZone ?? "UTC").date !== date) continue;
-    if (startAt.getTime() < Date.now() + 60_000 || startAt.getTime() > Date.now() + 180 * 86_400_000) continue;
+    if (requestedWindow) {
+      const startLocal = localParts(startAt, schedule.organization.timeZone ?? "UTC");
+      const endLocal = localParts(appointmentEnd(startAt, durationMinutes), schedule.organization.timeZone ?? "UTC");
+      if (startLocal.minute < requestedWindow.startMinute || endLocal.date !== date || endLocal.minute > requestedWindow.endMinute) continue;
+    }
+    if (startAt.getTime() < now.getTime() + 60_000 || startAt.getTime() > now.getTime() + 180 * 86_400_000) continue;
     if (bookableInSchedule(schedule, startAt, durationMinutes)) candidates.push(startAt);
   }
   const occupied = await AppointmentSlot.find({ organizationId, staffId,
@@ -90,9 +100,34 @@ export const checkAvailability = async (organizationId: mongoose.Types.ObjectId,
     .slice(0, 48).map((startAt) => ({ startAt: startAt.toISOString(), endAt: appointmentEnd(startAt, durationMinutes).toISOString() }));
 };
 
+export const inspectAvailability = async (organizationId: mongoose.Types.ObjectId, staffId: mongoose.Types.ObjectId,
+  date: string, durationMinutes: number, requestedWindow?: { startMinute: number; endMinute: number }, now = new Date()) => {
+  let schedule: Awaited<ReturnType<typeof loadSchedule>>;
+  try { schedule = await loadSchedule(organizationId, staffId); }
+  catch (error) {
+    if (error instanceof AppointmentError && error.code === "schedule_closed")
+      return { available: [], reason: "missing_schedule" as const };
+    throw error;
+  }
+  const available = await checkAvailability(organizationId, staffId, date, durationMinutes, requestedWindow, now);
+  if (available.length) return { available, reason: "available" as const };
+  const day = new Date(`${date}T12:00:00Z`).getUTCDay();
+  const fits = (windows: Array<{ day?: number | null; startMinute?: number | null; endMinute?: number | null }>) =>
+    windows.some((window) => window.day === day && typeof window.startMinute === "number" && typeof window.endMinute === "number" &&
+      (!requestedWindow || Math.max(window.startMinute, requestedWindow.startMinute) + durationMinutes <=
+        Math.min(window.endMinute, requestedWindow.endMinute)));
+  if (!fits(schedule.organization.openingHours ?? [])) return { available, reason: "business_closed" as const };
+  if (!fits(schedule.availability.windows ?? []) ||
+    schedule.availability.appointmentDurationsMinutes?.length && !schedule.availability.appointmentDurationsMinutes.includes(durationMinutes))
+    return { available, reason: "staff_unavailable" as const };
+  return { available, reason: "no_slots" as const };
+};
+
 export const reserveAppointment = async (input: {
   organizationId: mongoose.Types.ObjectId; staffId: mongoose.Types.ObjectId; startAt: Date;
   durationMinutes: number; visitorId?: string; conversationId?: mongoose.Types.ObjectId;
+  visitorName?: string;
+  listingId?: mongoose.Types.ObjectId;
   createdBy: "widget" | "staff";
 }, session: mongoose.ClientSession) => {
   const { endAt } = await assertBookable(input.organizationId, input.staffId, input.startAt, input.durationMinutes);

@@ -14,6 +14,12 @@ Set `DASHBOARD_ORIGIN=https://bots.openstacktool.com` exactly, with no path or t
 
 The Nginx template has a static-app Content Security Policy, no-sniff, and referrer policy. The embeddable widget runs on customer sites, which must allow the widget script and configured API origin under their own CSP. Google Fonts are requested by the dashboard stylesheet; self-host those fonts if third-party font requests are unsuitable for the pilot's privacy policy. Brand colors and dimensions come from `brand/tokens.json` and are generated with `npm run brand:generate`; publish both web and widget assets together when tokens change.
 
+## Telegram long-running processes
+
+Telegram requires a public HTTPS edge or approved tunnel, the private MongoDB replica set, and the API process started from `apps/api/src/index.ts` (`npm run dev:api` locally or `npm run start -w apps/api` after build). That API process starts the shared AI request worker, Telegram inbound recovery and outbound delivery worker, and retention worker. The dashboard is a separate web process or static Nginx service; it does not run the message workers. Health-check the API at `/health/ready` and verify that the tunnel forwards the webhook URL to the same API instance. `getWebhookInfo` can show a registered URL while its pending count and last error reveal a broken tunnel. Keep tunnel credentials outside the repository and inspect the service logs for startup failures. The current workers run in each API instance and coordinate through MongoDB claims; no separate worker container is required for this topology.
+
+Trace a message with the privacy-safe `connectionId`, `inboundId`, `requestId`, `conversationId`, and `deliveryId` fields in API logs. Inspect `channelinbounds.status`, `widgetrequests.status/errorCode`, and `channeldeliveries.status/failureCode`. An inbound record stuck as `received` is retried by the API worker after five seconds. Outbound 429/5xx responses are retried with backoff; ambiguous sends remain `uncertain` for operator reconciliation to avoid duplicate customer messages. Do not restart or re-register the webhook to mask an upstream routing failure. The live-delivery report records the current tunnel blocker and required verification steps.
+
 ## Required configuration and release sequence
 
 1. Use Node 22 or 24 LTS. Run `npm ci`, `npm run brand:check`, `npm run typecheck`, `npm test`, `npm run test:browser -w apps/web`, `npm run test:backup:restore -w apps/api`, `npm run build`, and `npm audit --audit-level=low`.

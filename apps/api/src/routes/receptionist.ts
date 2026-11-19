@@ -28,6 +28,8 @@ router.get("/:organizationId/receptionist/config", requireMembership(["owner", "
   res.json({ timeZone: organization?.timeZone ?? "UTC", openingHours: organization?.openingHours ?? [],
     staff: members.map((member) => ({ id: member.userId, name: users.find((user) => user._id.equals(member.userId))?.name ?? "Staff",
       windows: schedules.find((schedule) => schedule.staffId.equals(member.userId))?.windows ?? [],
+      services: schedules.find((schedule) => schedule.staffId.equals(member.userId))?.services ?? [],
+      appointmentDurationsMinutes: schedules.find((schedule) => schedule.staffId.equals(member.userId))?.appointmentDurationsMinutes ?? [15, 30, 45, 60, 90, 120],
     })),
   });
 });

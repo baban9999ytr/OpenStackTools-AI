@@ -41,6 +41,7 @@ router.get("/:organizationId/listings", read, async (req, res) => {
     ...(req.query.currency ? { currency: req.query.currency } : {}),
     ...(req.query.location ? { location: req.query.location } : {}),
     ...(req.query.propertyType ? { propertyType: req.query.propertyType } : {}),
+    ...(req.query.listingType ? { listingType: req.query.listingType } : {}),
     ...(req.query.minRooms ? { minRooms: Number(req.query.minRooms) } : {}),
     ...(req.query.minAreaSqm ? { minAreaSqm: Number(req.query.minAreaSqm) } : {}),
     ...(req.query.availability ? { availability: req.query.availability } : {}),

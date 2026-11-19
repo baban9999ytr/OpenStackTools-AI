@@ -43,6 +43,9 @@ export const env = {
   smtpFrom: must("SMTP_FROM"),
   smtpUser: process.env.SMTP_USER,
   smtpPassword: process.env.SMTP_PASSWORD,
+  telegramSelfServiceEnabled: process.env.TELEGRAM_SELF_SERVICE_ENABLED === "true",
+  telegramPublicApiOrigin: process.env.TELEGRAM_PUBLIC_API_ORIGIN?.trim() || undefined,
+  channelCredentialActiveKeyId: process.env.CHANNEL_CREDENTIAL_ACTIVE_KEY_ID?.trim() || undefined,
 };
 if (env.sessionSecret.length < 32)
   throw new Error("SESSION_SECRET must be at least 32 characters");
@@ -64,6 +67,8 @@ if (env.reasoningEffort && !["none", "low", "medium", "high", "xhigh", "max"].in
   throw new Error("Invalid OPENAI_REASONING_EFFORT");
 if (env.openaiModel === "gpt-6-luna" && env.reasoningEffort !== "none")
   throw new Error("GPT-6 Luna tool calling requires OPENAI_REASONING_EFFORT=none");
+if (["gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-astra"].includes(env.openaiModel))
+  throw new Error("This model requires a Responses API adapter for tool calling; Chat Completions is unsupported");
 
 if (env.defaultMonthlyBudgetMicros < env.defaultDailyBudgetMicros)
   throw new Error("Monthly budget must be at least the daily budget");
@@ -71,3 +76,19 @@ if (!env.inputPriceMicrosPerMillion || !env.outputPriceMicrosPerMillion)
   throw new Error("AI prices must be positive");
 if (!env.cachedInputPriceMicrosPerMillion || !env.cacheWritePriceMicrosPerMillion)
   throw new Error("AI cache prices must be positive");
+
+if (env.telegramSelfServiceEnabled) {
+  if (!env.telegramPublicApiOrigin || new URL(env.telegramPublicApiOrigin).origin !== env.telegramPublicApiOrigin ||
+    new URL(env.telegramPublicApiOrigin).protocol !== "https:")
+    throw new Error("TELEGRAM_PUBLIC_API_ORIGIN must be an HTTPS origin");
+  const telegramPort = new URL(env.telegramPublicApiOrigin).port;
+  if (telegramPort && !["443", "88", "8443"].includes(telegramPort))
+    throw new Error("TELEGRAM_PUBLIC_API_ORIGIN uses an unsupported webhook port");
+  if (!env.channelCredentialActiveKeyId || !/^[A-Z0-9_]{1,24}$/.test(env.channelCredentialActiveKeyId) ||
+    !process.env[`CHANNEL_CREDENTIAL_KEY_${env.channelCredentialActiveKeyId}`])
+    throw new Error("A dedicated active channel credential key is required");
+  const encoded = process.env[`CHANNEL_CREDENTIAL_KEY_${env.channelCredentialActiveKeyId}`]!;
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(encoded) || Buffer.from(encoded, "base64").length !== 32 ||
+    Buffer.from(encoded, "base64").toString("base64") !== encoded)
+    throw new Error("Active channel credential key must be 32 random bytes encoded as Base64");
+}

@@ -1,0 +1,42 @@
+# Model profiles and advanced AI configuration
+
+Date: 2026-11-13 (Europe/Istanbul). Local implementation only. No provider request, deployment, service restart, commit or push was made.
+
+## Existing architecture and decision
+
+Before this change, a single `OPENAI_MODEL` and optional `OPENAI_REASONING_EFFORT` applied to every assistant. The server used Chat Completions for tool selection and optional grounded synthesis, with one global price vector for budget admission and settlement. Assistant settings had response length and receptionist personality, but no model selection. Existing assistants therefore have no `modelSelection` and continue to use the legacy server model and rates. No existing Luna assistant is silently upgraded.
+
+New assistant selections are stored on the assistant, within the existing settings API. The platform allowlist defaults to Luna only. An operator can enable Terra and Sol after project entitlement and current rates are checked. When Terra is enabled, a new assistant defaults to Balanced; otherwise Economical. The three card descriptions are positioning, not quality or latency guarantees.
+
+## Verified documentation and compatibility
+
+The [Luna model page](https://developers.openai.com/api/docs/models/gpt-6-luna) documents `none`, `low`, `medium`, `high`, `xhigh`, and `max` reasoning, with `medium` default. It says Chat Completions function calling requires `none`; Responses supports function calling. The [Terra model page](https://developers.openai.com/api/docs/models/gpt-6.1-terra) has the same effort levels and requires Responses for tool calling. The [Sol model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol) supports `low`, `medium`, `high`, `xhigh`, and `max`, with `medium` default, and requires Responses for tool calling. All three list function calling and structured outputs. The installed OpenAI Node SDK is `7.50.0`; its Responses types include the required model, reasoning, function-tool, token-usage and service-tier fields. The profile adapter uses `responses.create`, `store: false`, function tools only for primary calls, and no SDK retries.
+
+The [official pricing table](https://developers.openai.com/api/docs/pricing) was reviewed on 2026-11-13. Standard text prices in USD per million tokens are Luna $0.10 input/$0.01 cached/$0.50 output, Terra $1/$0.05/$5, and Sol $2/$0.10/$10. The registry uses the published **12-hour cache-write** rates as a conservative upper bound: Luna $0.25, Terra $2.50, Sol $5.00. Its version is `openai-2026-11-13-standard-v1`. Actual invoices, account-specific access and future prices were not verified. The [Responses service-tier reference](https://developers.openai.com/api/reference/resources/responses/methods/create) distinguishes requested from returned tiers; project access and billing for faster tiers have not been established here. Only `default` (Standard) is currently enabled in tenant settings. Fast, Flex and Ultrafast are not selectable. No fixed speed multiplier is claimed.
+
+## Configuration and security
+
+`services/model-config.ts` is the single typed capability and price registry. Presets record profile only. Custom settings record a registry model, supported effort and `default` tier. The API rejects unknown IDs, unsupported effort/tier combinations, disabled models and organization policy violations. An optional organization allowlist and effort ceiling can narrow platform policy. The platform effort ceiling defaults to `medium`; it can be changed through `AI_MAX_REASONING_EFFORT`. Only owners/admins can create or edit assistant settings. `settingsVersion` prevents a stale dashboard edit from overwriting a newer one. The existing staff mutation middleware writes successful settings changes to `AuditEvent`.
+
+Effective precedence: platform model/effort/tier policy; organization model/effort policy and daily/monthly budgets; assistant selection; legacy server configuration only for assistants without a selection. Organization policy is checked again immediately before a provider request. The queue resolves one configuration for both primary tool selection and optional natural-language synthesis. It saves model and pricing version on the request before reservation, and records requested/actual tier plus pricing version on the usage event. Budget reservation includes both potential calls at selected model prices. Uncertain timeouts retain the full reservation. An unexpected provider tier fails the measured settlement path. No hidden paid fallback is used.
+
+Backend appointment availability, confirmation, booking persistence, cancellation authorization, tenant predicates and queue idempotency were not changed by model selection. Model output remains untrusted. The browser receives no provider key.
+
+## Dashboard
+
+The existing assistant form now contains three responsive, keyboard accessible profile cards and a collapsible advanced panel. It shows the registry model, use case, relative cost, recommendation marker, warning, effort compatibility, Standard tier, rate estimate, reset action and EN/TR explanations. Disabled models state that operator enablement is required. Existing assistants without a saved selection display a legacy preservation message. Customized settings are labelled as such. Browser tests exercise a mobile custom Sol selection and accessibility scan. The UI does not promise a profile has access before the operator enables it.
+
+## Verification
+
+Executed after implementation: `npm run typecheck` passed for API and web; `npm run build` passed for API and production web/widget bundles; `npm test` passed 93 API tests, including real isolated MongoDB tenant/budget tests and fake OpenAI Responses payload assertions; `npm run test:browser -w apps/web` passed 16 Chromium tests with mocked APIs; `npm run brand:check` passed; `npm audit --audit-level=low` reported zero vulnerabilities. These tests establish deterministic behavior and request construction. They do **not** establish account entitlement, live model function calling, conversational quality, provider tier delivery, invoice accuracy or real-model latency.
+
+The repository's existing Phase 8A runner provides 68 synthetic EN/TR scenarios and an opt-in capped live evaluation path. It can compare configured model IDs one at a time with separate operator approval, but it does not execute the full application booking workflow. No live comparison was run. A future comparison should use the same synthetic conversations for all models and record task completion, tool correctness, groundedness, context retention, human-reviewed naturalness, median/p95 latency, token breakdown, cost and fallback/error rates. Price alone is not a quality ranking.
+
+## Known limitations and operator procedure
+
+1. Verify the enabled model IDs, this project's entitlement, and current Standard pricing against official OpenAI documentation. Update and version the registry when rates change. Set `AI_ENABLED_MODELS` to the verified subset. Keep daily/monthly budget ceilings and a modest `AI_MAX_REASONING_EFFORT`. Premium tiers need account, rate and billing validation before implementation.
+2. In a synthetic test tenant, create a new assistant and confirm its default profile. Edit all three profiles, a compatible custom effort, reset to default and reject an unsupported combination. Confirm another tenant and agent/viewer cannot edit the assistant.
+3. With explicit operator approval and a dedicated low-spend key, send one synthetic message through the normal queue per enabled model; inspect actual function calls, returned tier and token counts, `UsageEvent`, budget windows and provider billing. Stop on a 404 or mismatch. This step was **not performed**.
+4. The application caps output at 800 tokens. Medium reasoning may consume that cap and yield too little customer text for some requests; live testing must establish practical settings. Missing cache-write breakdowns force conservative estimates, so the usage dashboard is an estimated cost view, not an invoice. Pricing has a review date but no automatic expiry/update mechanism.
+
+Recommended next steps: verify a dedicated project and perform a capped live Responses test; reconcile provider billing and cache behavior; benchmark the Phase 8A synthetic scenarios for Luna/Terra/Sol; then consider plan policy and faster tiers with verified account access and tier-specific price tables.

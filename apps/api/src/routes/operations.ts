@@ -11,9 +11,16 @@ import {
   AuditEvent,
   BudgetWindow,
   BusinessKnowledge,
+  ChannelConnection,
+  ChannelCredential,
+  ChannelDelivery,
+  ChannelIdentity,
+  ChannelInbound,
   Conversation,
   Customer,
   Listing,
+  InteractionToken,
+  ActionConfirmationAudit,
   Membership,
   Message,
   Organization,
@@ -46,6 +53,12 @@ const scoped = {
   staffAvailability: StaffAvailability,
   knowledge: BusinessKnowledge,
   listings: Listing,
+  channelConnections: ChannelConnection,
+  channelIdentities: ChannelIdentity,
+  channelInbound: ChannelInbound,
+  channelDeliveries: ChannelDelivery,
+  interactionTokens: InteractionToken,
+  actionConfirmations: ActionConfirmationAudit,
 };
 router.get(
   "/:organizationId/export/:kind",
@@ -104,16 +117,19 @@ router.get(
       .sort({ _id: 1 })
       .limit(100)
       .toArray();
-    const sanitized =
-      kind === "widgetSessions"
-        ? items.map((item) => {
-            const { tokenHash: _hash, ...rest } = item as Record<
-              string,
-              unknown
-            >;
-            return rest;
-          })
-        : items;
+    const sanitized = items.map((item) => {
+      const record = { ...item } as Record<string, unknown>;
+      if (kind === "widgetSessions" || kind === "interactionTokens") delete record.tokenHash;
+      if (kind === "channelInbound") delete record.interactionToken;
+      if (kind === "channelDeliveries") delete record.interactionToken;
+      if (kind === "channelConnections") {
+        delete record.credentialEnv;
+        delete record.webhookSecretEnv;
+        delete record.operationId;
+        delete record.operationLeaseUntil;
+      }
+      return record;
+    });
     res.json({
       items: sanitized,
       next: items.length === 100 ? items.at(-1)?._id : null,
@@ -153,6 +169,10 @@ router.delete(
       res.status(403).json({ error: "Confirmation failed" });
       return;
     }
+    if (await ChannelConnection.exists({ organizationId, status: { $ne: "disconnected" } })) {
+      res.status(409).json({ error: "Disconnect messaging channels before deleting the organization" });
+      return;
+    }
     const session = await mongoose.startSession();
     try {
       await session.withTransaction(async () => {
@@ -177,6 +197,13 @@ router.delete(
           StaffAvailability,
           BusinessKnowledge,
           Listing,
+          ChannelConnection,
+          ChannelCredential,
+          ChannelIdentity,
+          ChannelInbound,
+          ChannelDelivery,
+          InteractionToken,
+          ActionConfirmationAudit,
         ])
           await mongoose.connection
             .collection(model.collection.name)

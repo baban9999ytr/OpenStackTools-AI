@@ -137,9 +137,12 @@ export const runEvaluation = async (options: RunOptions = {}): Promise<EvalSumma
           if (scenario.category === "booking") assert.equal(await Appointment.countDocuments({ organizationId: orgA, visitorId: `eval-${scenario.id}` }), 0);
           if (scenario.category === "consent") assert.equal(await Customer.countDocuments({ organizationId: orgA, visitorId: `eval-${scenario.id}` }), 0);
         } else if (scenario.backend === "listing" || scenario.backend === "empty_listing") {
-          const listings = (action.result as { listings: Array<{ title: string }> }).listings;
+          const listings = (action.result as { listings: Array<{ title: string; price: number; currency: string }> }).listings;
           assert.equal(listings.length > 0, scenario.backend === "listing");
-          if (scenario.expectedFact) assert.ok(text.includes(scenario.expectedFact));
+          if (scenario.category === "budget") {
+            assert.ok(listings.some((listing) => listing.price === 100000 && listing.currency === "USD"));
+            assert.match(text, /100[.,]000\s+USD|USD\s+100[.,]000/);
+          } else if (scenario.expectedFact) assert.ok(text.includes(scenario.expectedFact));
           assert.doesNotMatch(text, /CROSS_TENANT_RECORD|OTHER_TENANT_SECRET/);
         } else if (scenario.backend === "knowledge") {
           if (scenario.expectedFact) assert.ok(text.includes(scenario.expectedFact));

@@ -5,11 +5,15 @@ import {
   type Conversation,
   type Message,
   type Organization,
+  type ModelOptions,
+  type ModelSelection,
 } from "./api";
 import { usePreferences } from "./preferences";
 import { Wordmark } from "./Wordmark";
 import { Receptionist } from "./Receptionist";
 import { Business } from "./Business";
+import { Channels } from "./Channels";
+import { ModelSettings } from "./ModelSettings";
 
 type Account = { id: string; name: string; email: string };
 type Me = { user: Account; organizations: Organization[] };
@@ -239,9 +243,11 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
     (item) => item.id === organizationId,
   );
   const [tab, setTab] = useState<
-    "assistants" | "inbox" | "receptionist" | "business" | "team" | "usage" | "sessions"
+    "assistants" | "inbox" | "receptionist" | "business" | "channels" | "team" | "usage" | "sessions"
   >("assistants");
   const [assistants, setAssistants] = useState<Assistant[]>([]);
+  const [modelOptions, setModelOptions] = useState<ModelOptions | null>(null);
+  const [modelSelection, setModelSelection] = useState<ModelSelection | null>(null);
   const [editingAssistantId, setEditingAssistantId] = useState("");
   const editingAssistant = assistants.find(
     (item) => item._id === editingAssistantId,
@@ -289,16 +295,18 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
   async function load() {
     if (!organizationId) return;
     try {
-      const [a, c] = await Promise.all([
+      const [a, c, modelData] = await Promise.all([
         api<{ assistants: Assistant[] }>(
           `/organizations/${organizationId}/assistants`,
         ),
         api<{ conversations: Conversation[] }>(
           `/organizations/${organizationId}/conversations`,
         ),
+        api<ModelOptions>(`/organizations/${organizationId}/model-options`),
       ]);
       setAssistants(a.assistants);
       setConversations(c.conversations);
+      setModelOptions(modelData);
       setError("");
     } catch (error) {
       setError(t(getError(error)));
@@ -307,9 +315,14 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
   useEffect(() => {
     void load();
     setEditingAssistantId("");
+    setModelOptions(null);
+    setModelSelection(null);
     setSelected("");
     setMessages([]);
   }, [organizationId]);
+  useEffect(() => {
+    setModelSelection(editingAssistantId ? editingAssistant?.modelSelection ?? null : modelOptions?.defaultSelection ?? null);
+  }, [editingAssistantId, modelOptions]);
   useEffect(() => {
     if (!selected || !organizationId) return;
     api<{ messages: Message[] }>(
@@ -351,6 +364,13 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
         body: JSON.stringify({
           name: data.get("name"),
           instructions: data.get("instructions"),
+          responseLength: data.get("responseLength"),
+          conversationStrategy: data.get("conversationStrategy"),
+          ...(modelSelection ? { modelSelection } : {}),
+          defaultLanguage: data.get("defaultLanguage"), tone: data.get("tone"),
+          greetingStyle: data.get("greetingStyle"), emojiUsage: data.get("emojiUsage"),
+          bookingNameRequired: data.get("bookingNameRequired") === "on",
+          defaultAppointmentDurationMinutes: Number(data.get("defaultAppointmentDurationMinutes")),
           allowedOrigins: String(data.get("allowedOrigins") ?? "")
             .split("\n")
             .map((item) => item.trim())
@@ -378,6 +398,14 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
           body: JSON.stringify({
             name: data.get("name"),
             instructions: data.get("instructions"),
+            responseLength: data.get("responseLength"),
+            conversationStrategy: data.get("conversationStrategy"),
+            ...(modelSelection ? { modelSelection } : {}),
+            settingsVersion: editingAssistant.settingsVersion ?? 0,
+            defaultLanguage: data.get("defaultLanguage"), tone: data.get("tone"),
+            greetingStyle: data.get("greetingStyle"), emojiUsage: data.get("emojiUsage"),
+            bookingNameRequired: data.get("bookingNameRequired") === "on",
+            defaultAppointmentDurationMinutes: Number(data.get("defaultAppointmentDurationMinutes")),
             allowedOrigins: String(data.get("allowedOrigins") ?? "")
               .split("\n")
               .map((item) => item.trim())
@@ -479,7 +507,7 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
           aria-label="Product navigation"
           className={navOpen ? "nav-open" : ""}
         >
-          {(["assistants", "inbox", "receptionist", "business", "team", "usage", "sessions"] as const)
+          {(["assistants", "inbox", "receptionist", "business", "channels", "team", "usage", "sessions"] as const)
             .filter((item) =>
               item === "team" || item === "usage" ? canManage : true,
             )
@@ -575,6 +603,10 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                       {item.allowedOrigins.length} {t("allowed origins")}
                     </p>
                     <code>{item.publicKey}</code>
+                    {item.active && ["localhost", "127.0.0.1"].includes(window.location.hostname) && item.allowedOrigins.includes(window.location.origin) ? (
+                      <a href={`/assistant-preview.html?assistant=${encodeURIComponent(item.publicKey)}&lang=${locale}&theme=${theme}`}
+                        target="_blank" rel="noopener noreferrer">{t("Test assistant")}</a>
+                    ) : ["localhost", "127.0.0.1"].includes(window.location.hostname) ? <small>{t("Add this dashboard origin to allowed origins to preview here.")} <code>{window.location.origin}</code></small> : null}
                     {canManage && (
                       <button
                         className="text-button"
@@ -623,6 +655,61 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                       defaultValue={editingAssistant?.instructions}
                     />
                   </label>
+                  <label>
+                    {t("AI response length")}
+                    <select name="responseLength" defaultValue={editingAssistant?.responseLength ?? "short"}>
+                      <option value="short">{t("Short")}</option>
+                      <option value="balanced">{t("Balanced")}</option>
+                      <option value="detailed">{t("Detailed")}</option>
+                    </select>
+                    <small>{t("Safety, consent and appointment details are always included.")}</small>
+                  </label>
+                  <label>{t("Conversation strategy")}
+                    <select name="conversationStrategy" defaultValue={editingAssistant?.conversationStrategy ?? "reactive"}>
+                      <option value="reactive">{t("Reactive assistance")}</option>
+                      <option value="real_estate">{t("Real estate preferences and follow-up")}</option>
+                    </select>
+                  </label>
+                  <ModelSettings options={modelOptions} value={modelSelection} onChange={setModelSelection} />
+                  <fieldset>
+                    <legend>{t("Conversation style")}</legend>
+                    <label>{t("Default language")}
+                      <select name="defaultLanguage" defaultValue={editingAssistant?.defaultLanguage ?? "auto"}>
+                        <option value="auto">{t("Follow visitor language")}</option>
+                        <option value="tr">Türkçe</option><option value="en">English</option>
+                      </select>
+                    </label>
+                    <label>{t("Tone")}
+                      <select name="tone" defaultValue={editingAssistant?.tone ?? "warm"}>
+                        <option value="warm">{t("Professional and warm")}</option>
+                        <option value="formal">{t("Formal corporate")}</option>
+                        <option value="friendly">{t("Friendly and conversational")}</option>
+                        <option value="concise">{t("Concise and efficient")}</option>
+                        <option value="concierge">{t("Premium concierge")}</option>
+                      </select>
+                    </label>
+                    <label>{t("Greeting")}
+                      <select name="greetingStyle" defaultValue={editingAssistant?.greetingStyle ?? "brief"}>
+                        <option value="brief">{t("Brief when useful")}</option><option value="standard">{t("Brief first-turn greeting")}</option>
+                      </select>
+                    </label>
+                    <label>{t("Emoji use")}
+                      <select name="emojiUsage" defaultValue={editingAssistant?.emojiUsage ?? "none"}>
+                        <option value="none">{t("No emoji")}</option><option value="minimal">{t("Minimal")}</option>
+                      </select>
+                    </label>
+                  </fieldset>
+                  <fieldset>
+                    <legend>{t("Appointment questions")}</legend>
+                    <label>{t("Default viewing duration")}
+                      <select name="defaultAppointmentDurationMinutes" defaultValue={editingAssistant?.defaultAppointmentDurationMinutes ?? 30}>
+                        {[15, 30, 45, 60, 90, 120].map((minutes) => <option key={minutes} value={minutes}>{minutes} {t("minutes")}</option>)}
+                      </select>
+                    </label>
+                    <label className="checkbox-label"><input type="checkbox" name="bookingNameRequired"
+                      defaultChecked={editingAssistant?.bookingNameRequired ?? false} />{t("Ask for a booking name")}</label>
+                    <small>{t("A phone number is not required for website or Telegram bookings.")}</small>
+                  </fieldset>
                   <button type="button" className="secondary" onClick={(event) => {
                     const field = event.currentTarget.closest("form")?.querySelector<HTMLTextAreaElement>('textarea[name="instructions"]');
                     if (field) field.value = realEstateTemplate[locale];
@@ -678,6 +765,10 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
         )}
         {tab === "business" && organization && (
           <Business organizationId={organizationId} role={organization.role} />
+        )}
+        {tab === "channels" && organization && (
+          <Channels organizationId={organizationId} role={organization.role} assistants={assistants}
+            onSelectAssistants={() => setTab("assistants")} />
         )}
         {tab === "inbox" && (
           <div className="inbox-layout">

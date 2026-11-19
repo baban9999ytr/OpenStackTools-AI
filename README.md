@@ -48,6 +48,8 @@ Use separate terminals for the two dev commands. Vite proxies `/api` to the back
 
 The public key is an identifier, not a credential. The browser requests a short-lived, origin-bound widget session. The widget is an original React component mounted in Shadow DOM. It does not use third-party artwork.
 
+For local testing, add the dashboard's exact origin (for example `http://localhost:5173`) to the assistant's allowed origins. The dashboard then shows **Test assistant**, which opens a same-origin page using the real widget, session, message queue and budgets. The preview is limited to loopback hosts. Inspect saved messages in **Conversations** and usage in **Usage**. A 429 pauses polling and honors `Retry-After`; a message retry keeps the same client message ID.
+
 The widget follows the embedding page's `lang` and `data-theme` where set. Optional `data-ost-lang="tr"` or `"en"` and `data-ost-theme="dark"` or `"light"` override those choices. The dashboard stores its language and theme locally. The versioned framework-independent brand contract is [`brand/tokens.json`](brand/tokens.json); run `npm run brand:generate` after changing it, then commit both generated stylesheets.
 
 ## Configuration
@@ -58,7 +60,10 @@ The widget follows the embedding page's `lang` and `data-theme` where set. Optio
 | `SESSION_SECRET` | Secret used to hash opaque session tokens; never expose to the browser |
 | `OPENAI_API_KEY` | Server-side provider key |
 | `OPENAI_MODEL` / `OPENAI_REASONING_EFFORT` | Chat Completions model and optional reasoning level; examples use `gpt-6-luna` with `none` |
+| `AI_ENABLED_MODELS` | Comma-separated operator allowlist for new assistant profiles; defaults to Luna only. Review project entitlement and current pricing before enabling Terra or Sol. Existing assistants keep their saved legacy configuration. |
+| `AI_MAX_REASONING_EFFORT` | Platform ceiling for tenant-selected reasoning; defaults to `medium`. Organization policy may set a stricter limit. |
 | `OPENAI_MAX_COMPLETION_TOKENS` | Maximum output including reasoning tokens (1–800) |
+| `APPOINTMENT_MORNING_WINDOW` / `APPOINTMENT_AFTERNOON_WINDOW` / `APPOINTMENT_EVENING_WINDOW` | Business-local, nonoverlapping 15-minute aligned periods for natural-language availability requests; defaults `09:00-12:00`, `12:00-17:00`, `17:00-21:00`. Organization and staff hours further restrict them. |
 | `DEFAULT_DAILY_BUDGET_USD` / `DEFAULT_MONTHLY_BUDGET_USD` | New-organization AI spend caps in USD |
 | `OPENAI_INPUT_USD_PER_MILLION_TOKENS` / `OPENAI_OUTPUT_USD_PER_MILLION_TOKENS` | Current model prices used for cost estimates and budget reservations |
 | `OPENAI_CACHED_INPUT_USD_PER_MILLION_TOKENS` / `OPENAI_CACHE_WRITE_USD_PER_MILLION_TOKENS` | Cache rates; if omitted, both use the ordinary input rate conservatively |
@@ -72,6 +77,70 @@ The widget follows the embedding page's `lang` and `data-theme` where set. Optio
 | `VITE_API_BASE_URL` | Optional public API origin for dashboard build |
 
 Frontend environment variables are public. Store credentials only in the API environment or a production secret manager. Do not put production secrets in `.env.example`, source control, or build arguments.
+
+Rental and sale searches use the listing's optional `listingType`. New dashboard listings require a selection; older records remain unclassified until staff review them. A rent or sale request never treats an unclassified listing as a verified match. A 3+1 request uses `minRooms=3`, so staff must also enter the room count for matching listings.
+
+The current adapter uses Chat Completions function tools. Configuration rejects models whose tool calling requires the Responses API. A configured key and model name do not prove project access; live provider calls require the existing explicit opt-in verification flow.
+
+For nonempty listing or business-knowledge results, the API can make one additional tool-free model call to write a natural answer from bounded verified facts. It checks selected factual claims and falls back to the backend formatter if synthesis fails or is rejected. Daily and monthly budget reservations include both calls, and the usage ledger sums their reported tokens. Appointment changes and confirmations remain backend-controlled. This feature has deterministic test coverage; live model quality and complete free-text factuality are not yet established.
+
+## Local fictional real-estate demo
+
+The demo seed creates **DEMO — Nilüfer Demo Emlak** with 13 fictional listings, three fictional consultants, two occupied appointment fixtures, business knowledge, and two synthetic conversations (one in handoff). It never uses `test@gmail.com` as a login or modifies an existing account. The alternative login identity is `demo-owner@openstacktools.test`. This reserved `.test` address is for local development only; no email is sent and no real inbox is assumed. Staff fixtures cannot sign in because their passwords are randomly generated and not exposed.
+
+Start the local MongoDB replica set and configure `apps/api/.env` for development. In a private terminal, enter a password without echoing it:
+
+```bash
+read -rs -p 'Local demo password: ' DEMO_OWNER_PASSWORD; echo
+export DEMO_OWNER_PASSWORD DEMO_SEED_CONFIRM=local-demo-only
+npm run demo:seed -w apps/api
+unset DEMO_OWNER_PASSWORD DEMO_SEED_CONFIRM
+```
+
+Sign in at `/app` with the `.test` identity and the password entered locally. The seed refuses production mode, nonlocal MongoDB hosts, and preexisting demo identities or organization names without its marker. Repeating a successful seed verifies the marker and leaves records unchanged. It does not reset or delete data. Never use real customer details in the demo. The demo organization has its own AI budget, but synthetic usage is **not** inserted into the actual provider-usage ledger; the dashboard starts at zero until a real request is processed. The widget preview requires the local dashboard origin in the assistant's allowed origins. Do not use the demo seed on shared or production databases.
+
+Assistant settings now include **AI response length**: Short (default), Balanced, or Detailed. Existing assistants without the field behave as Short; editing them stores the chosen value. This is a model instruction, not a hard output cutoff. Verified listing, safety, privacy, consent, and appointment details retain priority.
+
+Assistant settings also offer Economical (Luna), Balanced (Terra), and Advanced (Sol) model profiles plus compatible reasoning choices. A new assistant defaults to Balanced only when the operator has enabled Terra; otherwise it defaults to Economical. Existing assistants retain their server-configured legacy model until an owner or admin explicitly changes it. New profile requests use the Responses API for tool calling. The advanced processing selector currently offers Standard only; faster tiers require separate account and pricing validation. The backend validates combinations and reserves daily/monthly budget using the selected model's versioned rate table. See [model configuration report](MODEL_PROFILES_AND_ADVANCED_CONFIGURATION_REPORT.md).
+
+Owners and admins can also set the assistant's fallback language, tone, greeting, emoji use, whether a visitor name is needed for a booking, and default appointment duration. A guided viewing conversation keeps a verified listing and date through time selection and optional name collection. The server checks availability before proposing a booking; explicit confirmation is still required. These settings cannot override tenant access, platform safety rules, or booking controls. See the [conversational intelligence report](CONVERSATIONAL_INTELLIGENCE_REPORT.md) for evaluated behavior and limits.
+
+## Telegram channel (optional)
+
+The website widget and Telegram private chats use the same tenant-scoped conversation queue, assistant, appointment actions and AI budget. Telegram is not required for local development. The integration has deterministic tests with a fake adapter; real Telegram delivery has not been verified here.
+
+For a live local Telegram test, run the authenticated MongoDB replica set, API process (`npm run dev:api`), dashboard (`npm run dev:web`), and the approved HTTPS tunnel that forwards `/api/channels/telegram/*` to this API. The API process starts both the shared AI request worker and Telegram inbound recovery/outbound delivery worker; running only the web dashboard or a route-only test server will not deliver replies. Keep the API and tunnel running continuously. `/start` returns a short greeting without an OpenAI call; ordinary private text enters the assistant queue. The API logs only connection, inbound, request and delivery IDs, status and safe failure categories for tracing.
+
+If a bot shows **Connected** but does not answer, check public `/health/ready`, the tunnel process, and Telegram `getWebhookInfo` pending count, last delivery error and expected URL first. Then inspect MongoDB `channelinbounds`, `widgetrequests` and `channeldeliveries` by connection ID and status. No inbound record means the update has not reached this API; a queued request points to the shared worker; a completed request without a delivery points to the outbox worker; a failed or uncertain delivery needs provider-error review. Do not log or paste bot tokens, webhook secrets, full message bodies or customer contact details while troubleshooting. A verified webhook URL only proves registration, not successful delivery. See [live delivery diagnostic](TELEGRAM_LIVE_DELIVERY_DIAGNOSTIC_REPORT.md).
+
+### Self-service dashboard onboarding
+
+The **Channels** section lets organization owners and admins connect a BotFather bot to an active assistant, check the connection, repair or replace a token, disable it, reassign the assistant and disconnect after password confirmation. WhatsApp and Instagram cards are marked **Coming soon**. Existing operator-managed connections remain visible but cannot be modified through the self-service controls.
+
+Self-service remains disabled until the platform operator configures a public HTTPS API origin and a dedicated 32-byte credential encryption key in the API secret environment. Set `TELEGRAM_SELF_SERVICE_ENABLED=true`, `TELEGRAM_PUBLIC_API_ORIGIN=https://YOUR-PUBLIC-API-ORIGIN`, `CHANNEL_CREDENTIAL_ACTIVE_KEY_ID=V1`, and `CHANNEL_CREDENTIAL_KEY_V1` to a fresh random 32-byte value encoded as standard Base64. Generate and store the key in a secret manager; never put it in source control or the browser. Keep previous `CHANNEL_CREDENTIAL_KEY_<ID>` values available while any credential encrypted under those key IDs remains, then rewrap credentials by reconnecting them before retiring an old key. This key is separate from `SESSION_SECRET`. Do not enable self-service until the HTTPS route and workers are operating and monitored.
+
+An owner opens [BotFather](https://t.me/BotFather), sends `/newbot`, chooses a name and a unique username ending in `bot`, then pastes **only the bot token** into Channels. The backend calls the official Bot API `getMe`, stores the verified bot ID and username, creates a per-connection webhook secret, calls `setWebhook`, and checks `getWebhookInfo` before showing **Connected**. The dashboard never asks for a Telegram account password, login code, webhook URL or personal session. A timeout or webhook mismatch displays **Needs attention** and can be repaired without creating another connection. These calls occur only when an authorized owner/admin uses the dashboard and the operator has enabled self-service; this repository verification did not make live Telegram calls.
+
+When a bot token is revoked, check or reconnect it with a new token for the **same bot ID**. Disabling a connection blocks new inbound messages locally. Disconnect requires the staff member's current password, confirms the bot identity, removes the provider webhook, checks that it is gone, then removes the encrypted credential; historical conversations remain subject to tenant retention. Ambiguous provider outcomes remain **Needs attention** with inbound processing disabled. Monitor connection health, unhandled inbound updates, failed/uncertain outbound deliveries and decryption errors without logging tokens or message bodies. Customers must initiate their bot conversation before it can reply.
+
+The previous operator-managed environment-variable workflow remains available below for legacy connections. No existing operator-managed binding is migrated automatically.
+
+1. Configure a public HTTPS API origin with `/api/channels/telegram/*` forwarded to the API. Keep MongoDB, dashboard sessions and bot credentials private. Set an `OST_TELEGRAM_BOT_TOKEN_PILOT` and a random `OST_TELEGRAM_WEBHOOK_SECRET_PILOT` in the API secret environment. The webhook secret must use Telegram's allowed letters, digits, underscores or hyphens and be at most 256 characters. Never put these values in frontend environment variables.
+2. With MongoDB connected, bind an existing assistant public key to the verified Telegram bot account ID. This changes local configuration and requires an explicit operator command:
+
+   ```bash
+   npm run telegram:bind -w apps/api -- --confirm=bind --assistant=ASSISTANT_PUBLIC_KEY --botId=TELEGRAM_BOT_ID --credentialEnv=OST_TELEGRAM_BOT_TOKEN_PILOT --webhookSecretEnv=OST_TELEGRAM_WEBHOOK_SECRET_PILOT
+   ```
+
+3. After the public HTTPS endpoint is reachable, set the official Bot API webhook. The command checks `getMe` against the stored bot ID before calling `setWebhook`; it prints no token or secret:
+
+   ```bash
+   npm run telegram:webhook -w apps/api -- --confirm=set-webhook --connection=CONNECTION_ID --publicOrigin=https://api.example.invalid
+   ```
+
+Use a real HTTPS origin in place of the placeholder. The webhook consumes private text messages and callback confirmations. Explicit phrases such as “Evet, randevuyu onaylıyorum” and “Yes, confirm the appointment” also confirm the matching pending appointment; a bare “yes” asks for clarification. The MongoDB outbox retries definite 429/5xx rejections, while uncertain delivery requires operator review. In production, monitor `channeldeliveries` with `status=uncertain` and `channelinbounds` that remain unhandled. A bot cannot receive customer messages until its official webhook is installed and Telegram can reach the endpoint. No live provider call is made by ordinary tests.
+
+WhatsApp Business Platform and Instagram Messaging API are planned adapters only. Their credentials, permissions, webhook verification and outbound formats must be implemented and tested separately.
 
 ## Verification
 
@@ -95,6 +164,8 @@ The [AI evaluation guide](apps/api/evals/README.md) describes the 68 synthetic E
 ## Documentation
 
 - [Architecture and API boundaries](docs/ARCHITECTURE.md)
+- [Omnichannel core report](OMNICHANNEL_CORE_REPORT.md)
+- [Self-service channel onboarding report](SELF_SERVICE_CHANNEL_ONBOARDING_REPORT.md)
 - [Database schema and indexes](docs/SCHEMA.md)
 - [Security review](docs/SECURITY_REVIEW.md)
 - [Verification record](docs/VERIFICATION.md)
@@ -106,6 +177,9 @@ The [AI evaluation guide](apps/api/evals/README.md) describes the 68 synthetic E
 - [Phase 6 business knowledge report](PHASE6_BUSINESS_KNOWLEDGE_REPORT.md)
 - [Phase 7 integration readiness report](PHASE7_INTEGRATION_READINESS_REPORT.md)
 - [Phase 8A AI evaluation report](PHASE8A_AI_EVALUATION_REPORT.md)
+- [Conversational intelligence report](CONVERSATIONAL_INTELLIGENCE_REPORT.md)
+- [Conversation continuity repair report](CONVERSATION_CONTINUITY_REPAIR_REPORT.md)
+- [Conversational Intelligence 2.0 report](CONVERSATIONAL_INTELLIGENCE_V2_REPORT.md)
 - [Local HTTPS staging runbook](LOCAL_HTTPS_STAGING_RUNBOOK.md)
 - [Live provider verification gates](LIVE_PROVIDER_VERIFICATION.md)
 - [Staging runbook](STAGING_RUNBOOK.md)

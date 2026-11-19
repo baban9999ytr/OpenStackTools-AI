@@ -3,6 +3,7 @@ import { BudgetWindow, Organization, WidgetRequest } from "../models/index.js";
 import { env } from "../config/env.js";
 import { MAX_COMPLETION_TOKENS, type Turn } from "./ai.js";
 import { costMicros } from "./money.js";
+import type { EffectiveModel } from "./model-config.js";
 
 export class BudgetExceeded extends Error {
   constructor() {
@@ -23,7 +24,11 @@ export const measuredCostMicros = (
     cacheWriteTokens?: number;
     usageBreakdownKnown?: boolean;
   } = {},
+  configuration?: EffectiveModel,
 ) => {
+  const prices = configuration?.prices ?? { input: env.inputPriceMicrosPerMillion,
+    cachedInput: env.cachedInputPriceMicrosPerMillion, cacheWrite: env.cacheWritePriceMicrosPerMillion,
+    output: env.outputPriceMicrosPerMillion };
   const cached = details.cachedInputTokens ?? 0;
   const written = details.cacheWriteTokens ?? 0;
   if (
@@ -32,18 +37,18 @@ export const measuredCostMicros = (
     ) || cached + written > inputTokens
   ) throw new Error("Invalid provider token breakdown");
   const inputCost = details.usageBreakdownKnown
-    ? costMicros(inputTokens - cached - written, env.inputPriceMicrosPerMillion) +
-      costMicros(cached, env.cachedInputPriceMicrosPerMillion) +
-      costMicros(written, env.cacheWritePriceMicrosPerMillion)
+    ? costMicros(inputTokens - cached - written, prices.input) +
+      costMicros(cached, prices.cachedInput) +
+      costMicros(written, prices.cacheWrite)
     : costMicros(
         inputTokens,
         Math.max(
-          env.inputPriceMicrosPerMillion,
-          env.cachedInputPriceMicrosPerMillion,
-          env.cacheWritePriceMicrosPerMillion,
+          prices.input,
+          prices.cachedInput,
+          prices.cacheWrite,
         ),
       );
-  const total = inputCost + costMicros(outputTokens, env.outputPriceMicrosPerMillion);
+  const total = inputCost + costMicros(outputTokens, prices.output);
   if (!Number.isSafeInteger(total)) throw new Error("Estimated cost is too large");
   return total;
 };
@@ -53,6 +58,7 @@ export const measuredCostMicros = (
 export const maximumReservationMicros = (
   instructions: string,
   history: Turn[],
+  configuration?: EffectiveModel,
 ) => {
   const bytes =
     Buffer.byteLength(instructions) +
@@ -60,9 +66,11 @@ export const maximumReservationMicros = (
   const upperInputTokens = bytes * 4 + 4096;
   if (!Number.isSafeInteger(upperInputTokens))
     throw new Error("Context too large");
+  if (configuration?.mode === "product" && upperInputTokens > 272_000)
+    throw new Error("Context exceeds verified short-context pricing boundary");
   // A cache write can cost more than ordinary input. Reserve for that worst
   // case; three microdollars cover per-category rounding on settlement.
-  return measuredCostMicros(upperInputTokens, MAX_COMPLETION_TOKENS) + 3;
+  return measuredCostMicros(upperInputTokens, MAX_COMPLETION_TOKENS, {}, configuration) + 3;
 };
 
 const ensureWindow = async (

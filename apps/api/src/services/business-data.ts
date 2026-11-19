@@ -16,6 +16,7 @@ export const listingInput = z.strictObject({
   title: named(150), description: named(2000), location: named(150),
   price: z.number().finite().min(0).max(1_000_000_000),
   currency: z.enum(["TRY", "USD", "EUR", "GBP"]),
+  listingType: z.enum(["rent", "sale"]).optional(),
   propertyType: z.enum(["apartment", "house", "land", "commercial"]),
   rooms: z.number().int().min(0).max(50).optional(),
   areaSqm: z.number().finite().min(1).max(1_000_000),
@@ -26,7 +27,10 @@ export const listingFilters = z.strictObject({
   budgetMax: z.number().finite().min(0).max(1_000_000_000).optional(),
   currency: z.enum(["TRY", "USD", "EUR", "GBP"]).optional(),
   location: short(100).optional(),
+  locations: z.array(short(100)).min(1).max(3).optional(),
   propertyType: listingInput.shape.propertyType.optional(),
+  listingType: listingInput.shape.listingType,
+  exactRooms: z.number().int().min(0).max(50).optional(),
   minRooms: z.number().int().min(0).max(50).optional(),
   minAreaSqm: z.number().finite().min(0).max(1_000_000).optional(),
   availability: z.enum(["available", "reserved", "sold"]).default("available"),
@@ -40,11 +44,34 @@ export const searchListings = async (organizationId: mongoose.Types.ObjectId, ra
   if (filters.budgetMax !== undefined) query.price = { $lte: filters.budgetMax };
   if (filters.currency) query.currency = filters.currency;
   if (filters.propertyType) query.propertyType = filters.propertyType;
-  if (filters.minRooms !== undefined) query.rooms = { $gte: filters.minRooms };
+  if (filters.listingType) query.listingType = filters.listingType;
+  if (filters.exactRooms !== undefined) query.rooms = filters.exactRooms;
+  if (filters.minRooms !== undefined && filters.exactRooms === undefined) query.rooms = { $gte: filters.minRooms };
   if (filters.minAreaSqm !== undefined) query.areaSqm = { $gte: filters.minAreaSqm };
-  if (filters.location) query.location = { $regex: filters.location.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
-  return Listing.find(query).select("title description location price currency propertyType rooms areaSqm availability publicUrl updatedAt")
-    .sort({ updatedAt: -1 }).limit(freshOnly ? 10 : 100).lean();
+  if (filters.location) {
+    const terms = filters.location.match(/[\p{L}\p{N}]+/gu) ?? [];
+    if (!terms.length || terms.length > 6) return [];
+    const variants: Record<string, string> = { a: "[aâAÂ]", c: "[cçCÇ]", ç: "[cçCÇ]", g: "[gğGĞ]", ğ: "[gğGĞ]", i: "[iıİI]", ı: "[iıİI]", o: "[oöOÖ]", ö: "[oöOÖ]", s: "[sşSŞ]", ş: "[sşSŞ]", u: "[uüUÜ]", ü: "[uüUÜ]" };
+    const pattern = (term: string) => [...term].map((character) => variants[character.toLocaleLowerCase("tr")] ?? character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("");
+    if (terms.length) query.$and = terms.map((term) => ({ location: { $regex: pattern(term), $options: "i" } }));
+  }
+  if (filters.locations?.length) {
+    const variants: Record<string, string> = { a: "[aâAÂ]", c: "[cçCÇ]", ç: "[cçCÇ]", g: "[gğGĞ]", ğ: "[gğGĞ]", i: "[iıİI]", ı: "[iıİI]", o: "[oöOÖ]", ö: "[oöOÖ]", s: "[sşSŞ]", ş: "[sşSŞ]", u: "[uüUÜ]", ü: "[uüUÜ]" };
+    const pattern = (term: string) => [...term].map((character) => variants[character.toLocaleLowerCase("tr")] ?? character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("");
+    const alternatives = filters.locations.map((location) => location.match(/[\p{L}\p{N}]+/gu) ?? []);
+    if (alternatives.some((terms) => !terms.length || terms.length > 6)) return [];
+    query.$or = alternatives.map((terms) => ({ $and: terms.map((term) => ({ location: { $regex: pattern(term), $options: "i" } })) }));
+  }
+  const found = await Listing.find(query).select("title description location price currency listingType propertyType rooms areaSqm availability publicUrl updatedAt")
+    .sort({ updatedAt: -1 }).limit(freshOnly ? filters.locations ? 30 : 10 : 100).lean();
+  if (!filters.locations?.length) return found;
+  const folded = (value: string) => value.toLocaleLowerCase("tr").normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "i");
+  const rank = (location: string) => {
+    const index = filters.locations!.findIndex((term) => folded(location).includes(folded(term)));
+    return index < 0 ? filters.locations!.length : index;
+  };
+  return found.sort((a, b) => rank(a.location) - rank(b.location)).slice(0, freshOnly ? 10 : 100);
 };
 
 export const retrieveKnowledge = async (organizationId: mongoose.Types.ObjectId, topic: string) => {
@@ -53,15 +80,21 @@ export const retrieveKnowledge = async (organizationId: mongoose.Types.ObjectId,
     Organization.findById(organizationId).select("timeZone openingHours").lean(),
   ]);
   const needle = topic.trim().toLocaleLowerCase().slice(0, 100);
+  const intent = /service|hizmet|offer|yardım/.test(needle) ? "services"
+    : /contact|iletişim|telefon|email|address|adres/.test(needle) ? "contact"
+      : /hour|saat|open|açık|çalışma/.test(needle) ? "hours"
+        : /polic|policy|kural|ilke|koşul|gizlilik/.test(needle) ? "policies"
+          : /faq|question|soru/.test(needle) ? "faqs"
+            : /intro|company|business|profile|about|kim|hakkında|tanıt/.test(needle) ? "profile" : "literal";
   const matches = (value: string) => !needle || value.toLocaleLowerCase().includes(needle);
   return {
-    profile: matches(knowledge?.profile ?? "") ? knowledge?.profile ?? "" : "",
-    services: (knowledge?.services ?? []).filter((item) => matches(`${item.name} ${item.description}`)).slice(0, 8),
-    faqs: (knowledge?.faqs ?? []).filter((item) => matches(`${item.question} ${item.answer}`)).slice(0, 8),
-    policies: (knowledge?.policies ?? []).filter((item) => matches(`${item.title} ${item.text}`)).slice(0, 5),
-    facts: (knowledge?.facts ?? []).filter((item) => matches(`${item.label} ${item.value}`)).slice(0, 8),
-    contact: !needle || ["contact", "email", "phone", "address", "website", "iletişim", "telefon", "adres"].some((word) => needle.includes(word)) ? knowledge?.contact ?? null : null,
-    openingHours: !needle || ["hour", "open", "saat", "açık"].some((word) => needle.includes(word)) ? organization?.openingHours ?? [] : [],
+    profile: !needle || intent === "profile" || intent === "services" || matches(knowledge?.profile ?? "") ? knowledge?.profile ?? "" : "",
+    services: (knowledge?.services ?? []).filter((item) => !needle || intent === "services" || matches(`${item.name} ${item.description}`)).slice(0, 8),
+    faqs: (knowledge?.faqs ?? []).filter((item) => !needle || intent === "faqs" || matches(`${item.question} ${item.answer}`)).slice(0, 8),
+    policies: (knowledge?.policies ?? []).filter((item) => !needle || intent === "policies" || matches(`${item.title} ${item.text}`)).slice(0, 5),
+    facts: (knowledge?.facts ?? []).filter((item) => !needle || intent === "services" || matches(`${item.label} ${item.value}`)).slice(0, 8),
+    contact: !needle || intent === "contact" ? knowledge?.contact ?? null : null,
+    openingHours: !needle || intent === "hours" ? organization?.openingHours ?? [] : [],
     timeZone: organization?.timeZone ?? "UTC",
   };
 };

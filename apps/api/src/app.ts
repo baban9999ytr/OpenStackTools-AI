@@ -20,8 +20,14 @@ import { auditStaffMutation } from "./middleware/audit.js";
 import businessRoutes from "./routes/business.js";
 import operationsRoutes from "./routes/operations.js";
 import receptionistRoutes from "./routes/receptionist.js";
+import { telegramRoutes } from "./routes/telegram.js";
+import { telegramAdapter } from "./services/channels/telegram.js";
+import type { ChannelAdapter } from "./services/channels/types.js";
+import { channelRoutes } from "./routes/channels.js";
+import { telegramManagementProvider, type TelegramManagementProvider } from "./services/channels/telegram-management.js";
 
-export const createApp = (respond: AIResponder = openAIResponder) => {
+export const createApp = (respond: AIResponder = openAIResponder, channelAdapter: ChannelAdapter = telegramAdapter,
+  managementProvider: TelegramManagementProvider = telegramManagementProvider) => {
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", env.trustProxy);
@@ -45,6 +51,7 @@ export const createApp = (respond: AIResponder = openAIResponder) => {
     credentials: true,
   });
   const widgetCors = cors({
+    exposedHeaders: ["Retry-After", "RateLimit-Reset"],
     origin: async (origin, callback) => {
       if (!origin) {
         callback(null, false);
@@ -62,7 +69,10 @@ export const createApp = (respond: AIResponder = openAIResponder) => {
       }
     },
   });
-  app.use(express.json({ limit: "16kb" }));
+  app.use(express.json({ limit: "16kb", verify(req, _res, body) {
+    if (req.url?.startsWith("/api/channels/"))
+      (req as typeof req & { rawBody?: Buffer }).rawBody = Buffer.from(body);
+  } }));
   app.use(cookieParser());
   app.get("/health/live", (_req, res) => {
     res.json({ status: "ok" });
@@ -73,7 +83,7 @@ export const createApp = (respond: AIResponder = openAIResponder) => {
       .status(ready ? 200 : 503)
       .json({ status: ready ? "ready" : "unavailable" });
   });
-  app.use(generalLimit);
+  app.use((req, res, next) => req.path.startsWith("/api/widget/") ? next() : generalLimit(req, res, next));
   app.use("/api", (_req, res, next) => {
     res.set("Cache-Control", "no-store");
     next();
@@ -89,9 +99,11 @@ export const createApp = (respond: AIResponder = openAIResponder) => {
     receptionistRoutes,
     businessRoutes,
     assistantRoutes,
+    channelRoutes(managementProvider),
     conversationRoutes,
   );
   app.use("/api/widget", widgetCors, widgetRoutes(respond));
+  app.use("/api/channels/telegram", telegramRoutes(channelAdapter));
   app.use((_req, res) => {
     res.status(404).json({ error: "Not found" });
   });

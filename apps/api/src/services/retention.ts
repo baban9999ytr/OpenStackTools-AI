@@ -3,11 +3,16 @@ import {
   AgentAction,
   Appointment,
   AppointmentSlot,
+  ActionConfirmationAudit,
+  ChannelDelivery,
+  ChannelIdentity,
+  ChannelInbound,
   Conversation,
   Customer,
   Listing,
   Message,
   Organization,
+  InteractionToken,
   WidgetRequest,
   WidgetSession,
 } from "../models/index.js";
@@ -48,6 +53,13 @@ export const runRetention = async (now = new Date()) => {
             { $unset: { currentConversationId: 1 } },
             { session },
           );
+          await ChannelIdentity.updateMany(
+            { organizationId: organization._id, currentConversationId: { $in: ids } },
+            { $unset: { currentConversationId: 1 } }, { session },
+          );
+          await ChannelDelivery.deleteMany({ organizationId: organization._id, conversationId: { $in: ids } }, { session });
+          await InteractionToken.deleteMany({ organizationId: organization._id, conversationId: { $in: ids } }, { session });
+          await ActionConfirmationAudit.deleteMany({ organizationId: organization._id, conversationId: { $in: ids } }, { session });
           await Conversation.deleteMany(
             {
               organizationId: organization._id,
@@ -62,6 +74,12 @@ export const runRetention = async (now = new Date()) => {
       }
     }
     await AgentAction.deleteMany({ organizationId: organization._id, createdAt: { $lt: cutoff } });
+    await ChannelInbound.deleteMany({ organizationId: organization._id, createdAt: { $lt: cutoff } });
+    await ChannelIdentity.deleteMany({ organizationId: organization._id, updatedAt: { $lt: cutoff },
+      currentConversationId: { $exists: false } });
+    await ChannelDelivery.deleteMany({ organizationId: organization._id, createdAt: { $lt: cutoff }, status: { $in: ["sent", "failed", "uncertain"] } });
+    await ActionConfirmationAudit.deleteMany({ organizationId: organization._id, createdAt: { $lt: cutoff } });
+    await InteractionToken.deleteMany({ organizationId: organization._id, expiresAt: { $lt: now } });
     await Customer.deleteMany({ organizationId: organization._id, updatedAt: { $lt: cutoff } });
     await Listing.deleteMany({ organizationId: organization._id, archivedAt: { $lt: cutoff } });
     const oldAppointments = await Appointment.find({ organizationId: organization._id, endAt: { $lt: cutoff } }).select("_id").lean();

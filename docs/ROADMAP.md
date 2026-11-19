@@ -1,20 +1,18 @@
-# Implementation roadmap after pilot readiness
+# Implementation roadmap
 
 ## Shipped foundation
 
-Organizations, roles, verified accounts, owner invitations, reset and session revocation; assistants and website origins; tenant-scoped conversations; human handoff; budget and cost ledger; durable idempotent widget queue; tab-scoped widget restoration; MongoDB-backed rate limits; retention/export/deletion/audit; local Docker and tests.
+Organizations, roles, verified accounts, invitations, session revocation, assistants, website widget, tenant-scoped conversations, human handoff, budgets, durable message queue, rate limits, retention/export/deletion, appointments, business knowledge, listings, and local Docker tests. Telegram now has a shared-channel adapter and self-service owner/admin onboarding behind an operator feature flag. WhatsApp and Instagram remain unimplemented.
 
-## Before the first business pilot
+## Before a real-business Telegram pilot
 
-1. Configure real provider model/prices, SMTP, budgets, TLS, private MongoDB, backup/restore, exact origins, monitoring, and privacy notice. Exercise the full journey with the pilot business. Complexity: medium, operational.
-2. Test multi-instance worker recovery, provider timeouts, invoice reconciliation, and production-like traffic. Add alerts for budget exhaustion, uncertain charges, queue age, and failed email. Complexity: medium.
-3. Perform an accessibility review with assistive technology and refine widget reconnect behavior on low-quality networks. Session management is available in the dashboard. Complexity: low to medium.
+1. Provision a public HTTPS API route, authenticated private MongoDB, dedicated credential keys in a secret manager, key backup, worker monitoring, exact dashboard origin and retention policy. Complexity: medium, operational.
+2. Exercise onboarding, callback confirmation, token revocation, reconnect and disconnect with a dedicated real Telegram test bot. Verify provider-side webhook state and send/receive behavior. No live provider verification has been completed in this repository task. Complexity: medium.
+3. Rehearse key rotation and backup restore, reconcile uncertain outbound deliveries, alert on stuck inbound updates and decryption failures, and review privacy notices for channel customer data. Complexity: medium.
+4. Complete live OpenAI tool-calling and cost-accounting evaluation, accessibility checks with assistive technology, and a controlled end-to-end business workflow before changing the pilot decision. Complexity: medium to high.
 
 ## After pilot validation
 
-4. Add tenant-scoped knowledge retrieval and evidence evaluation only when real customer documents justify it. Complexity: high.
-5. Stage tenant deletion for larger volumes, refine retention/legal-hold rules, add MFA and support procedures. Complexity: medium to high.
-6. Build channel adapter interfaces and implement one official channel after confirming customer demand and platform permissions. Complexity: high.
-7. Add billing, self-service onboarding, platform administration, and support tooling after repeatable paid use. Complexity: high.
-
-Do not implement WhatsApp, Instagram, Telegram, or Messenger before validating demand and operating economics.
+5. Add operational support for large-tenant deletion and legal holds; consider MFA for channel administrators. Complexity: medium.
+6. Validate demand and official business authorization requirements before implementing WhatsApp or Instagram. Build provider-specific OAuth/authorization, permissions, webhook verification, messaging policy, delivery receipts and recovery; do not copy Telegram's token-paste flow. Complexity: high.
+7. Add billing, platform administration and broader self-service features only after repeatable paid use. Complexity: high.

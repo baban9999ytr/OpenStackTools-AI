@@ -6,13 +6,13 @@ type Knowledge = { profile: string; services: Array<{ name: string; description:
   faqs: Array<{ question: string; answer: string }>; policies: Array<{ title: string; text: string }>;
   contact: { email: string; phone: string; address: string; website: string }; facts: Array<{ label: string; value: string }> };
 type Listing = { _id: string; title: string; description: string; location: string; price: number; currency: string;
-  propertyType: string; rooms?: number; areaSqm: number; availability: string; publicUrl?: string; updatedAt: string };
+  propertyType: string; listingType?: string; rooms?: number; areaSqm: number; availability: string; publicUrl?: string; updatedAt: string };
 type Lead = { _id: string; name: string; contact: string; request: string; leadStatus: string; requirements?: string;
   budgetMin?: number; budgetMax?: number; preferredLocations?: string[]; propertyTypes?: string[]; minRooms?: number;
   minAreaSqm?: number; assignedTo?: string | null; notes?: string; followUpAt?: string | null; conversationId?: string };
 type Summary = { conversationId: string; status: string; updatedAt: string; recent: Array<{ role: string; text: string }> };
 const emptyKnowledge: Knowledge = { profile: "", services: [], faqs: [], policies: [], contact: { email: "", phone: "", address: "", website: "" }, facts: [] };
-const emptyListing = { title: "", description: "", location: "", price: 0, currency: "TRY", propertyType: "apartment", rooms: 0, areaSqm: 1, availability: "available", publicUrl: "" };
+const emptyListing = { title: "", description: "", location: "", price: 0, currency: "TRY", listingType: "", propertyType: "apartment", rooms: 0, areaSqm: 1, availability: "available", publicUrl: "" };
 const errorText = (error: unknown) => error instanceof Error ? error.message : "Something went wrong";
 const localInput = (iso?: string | null) => iso ? new Date(new Date(iso).getTime() - new Date(iso).getTimezoneOffset() * 60_000).toISOString().slice(0, 16) : "";
 
@@ -83,7 +83,7 @@ export function Business({ organizationId, role }: { organizationId: string; rol
   async function saveListing(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
     try {
-      const body = { ...listing, ...(listing.publicUrl ? {} : { publicUrl: undefined }) };
+      const body = { ...listing, ...(listing.publicUrl ? {} : { publicUrl: undefined }), ...(listing.listingType ? {} : { listingType: undefined }) };
       await api(`${base}/listings${editing ? `/${editing}` : ""}`, { method: editing ? "PATCH" : "POST", body: JSON.stringify(body) });
       setNotice(t("Listing saved.")); setListing(emptyListing); setEditing(""); await load();
     } catch (caught) { setError(t(errorText(caught))); } finally { setBusy(false); }
@@ -116,10 +116,10 @@ export function Business({ organizationId, role }: { organizationId: string; rol
     <section className="card"><h2>{t("Property listings")}</h2>
       <form onSubmit={(event) => { event.preventDefault(); void load(); }}><label>{t("Search location")}<input value={filter} maxLength={100} onChange={(event) => setFilter(event.target.value)} /></label><button className="secondary">{t("Search")}</button></form>
       {listings.length === 0 && <p className="muted">{t("No matching listings.")}</p>}
-      {listings.map((item) => <div className="list-item" key={item._id}><strong>{item.title}</strong><span>{item.location} · {item.price} {item.currency} · {t(item.availability)}</span>
+      {listings.map((item) => <div className="list-item" key={item._id}><strong>{item.title}</strong><span>{item.location} · {item.price} {item.currency} · {item.listingType ? t(item.listingType) : t("Unspecified listing type")} · {t(item.availability)}</span>
         <small>{t("Updated")}: {new Date(item.updatedAt).toLocaleDateString(locale)}</small>
         {canWrite && <div className="handoff-actions"><button type="button" className="secondary" onClick={() => { setEditing(item._id); setListing({ title: item.title, description: item.description, location: item.location,
-          price: item.price, currency: item.currency, propertyType: item.propertyType, rooms: item.rooms ?? 0,
+          price: item.price, currency: item.currency, listingType: item.listingType ?? "", propertyType: item.propertyType, rooms: item.rooms ?? 0,
           areaSqm: item.areaSqm, availability: item.availability, publicUrl: item.publicUrl ?? "" }); }}>{t("Edit")}</button>
           <button type="button" className="secondary" disabled={busy} onClick={() => void archive(item._id)}>{t("Archive")}</button></div>}
       </div>)}
@@ -129,8 +129,9 @@ export function Business({ organizationId, role }: { organizationId: string; rol
         <div className="business-pair"><label>{t("Location")}<input required maxLength={150} value={listing.location} onChange={(event) => setListing({ ...listing, location: event.target.value })} /></label>
           <label>{t("Price")}<input required type="number" min="0" value={listing.price} onChange={(event) => setListing({ ...listing, price: Number(event.target.value) })} /></label>
           <label>{t("Currency")}<select value={listing.currency} onChange={(event) => setListing({ ...listing, currency: event.target.value })}>{["TRY", "USD", "EUR", "GBP"].map((value) => <option key={value}>{value}</option>)}</select></label>
+          <label>{t("Listing type")}<select required value={listing.listingType} onChange={(event) => setListing({ ...listing, listingType: event.target.value })}><option value="">{t("Select listing type")}</option><option value="rent">{t("rent")}</option><option value="sale">{t("sale")}</option></select></label>
           <label>{t("Property type")}<select value={listing.propertyType} onChange={(event) => setListing({ ...listing, propertyType: event.target.value })}>{["apartment", "house", "land", "commercial"].map((value) => <option key={value} value={value}>{t(value)}</option>)}</select></label>
-          <label>{t("Rooms")}<input type="number" min="0" max="50" value={listing.rooms} onChange={(event) => setListing({ ...listing, rooms: Number(event.target.value) })} /></label>
+          <label>{t("Rooms")}<input type="number" min="0" max="50" value={listing.rooms} onChange={(event) => setListing({ ...listing, rooms: Number(event.target.value) })} /><small>{t("For 3+1, enter 3.")}</small></label>
           <label>{t("Area (m²)")}<input type="number" min="1" value={listing.areaSqm} onChange={(event) => setListing({ ...listing, areaSqm: Number(event.target.value) })} /></label>
           <label>{t("Availability")}<select value={listing.availability} onChange={(event) => setListing({ ...listing, availability: event.target.value })}>{["available", "reserved", "sold"].map((value) => <option key={value} value={value}>{t(value)}</option>)}</select></label>
           <label>{t("Public URL")}<input type="url" maxLength={500} value={listing.publicUrl} onChange={(event) => setListing({ ...listing, publicUrl: event.target.value })} /></label></div>

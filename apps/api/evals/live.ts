@@ -13,6 +13,7 @@ const key = process.env.OPENAI_API_KEY ?? "";
 if (!key || key.startsWith("local-") || key.startsWith("replace-") || key.startsWith("unused-")) throw new Error("A dedicated non-placeholder key is required");
 const model = process.env.EVAL_MODEL_ID ?? "";
 if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(model)) throw new Error("Set a valid EVAL_MODEL_ID; availability is not assumed");
+if (["gpt-6.1-sol", "gpt-6-astra"].includes(model)) throw new Error("This model needs a Responses API adapter for tool evaluation");
 const reasoningEffort = process.env.EVAL_REASONING_EFFORT ?? "none";
 if (!["none", "low", "medium", "high", "xhigh", "max"].includes(reasoningEffort)) throw new Error("Invalid reasoning effort");
 if (model === "gpt-6-luna" && reasoningEffort !== "none") throw new Error("This application's GPT-6 Luna tool mode requires reasoning effort none");

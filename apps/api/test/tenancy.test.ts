@@ -193,11 +193,19 @@ test("assistant ownership and cross-tenant authorization", async () => {
     .send({
       name: "Acme Helper",
       instructions: "Answer questions about Acme and hand off when unsure.",
+      tone: "warm", defaultLanguage: "auto", bookingNameRequired: true,
+      defaultAppointmentDurationMinutes: 30, emojiUsage: "none", greetingStyle: "brief",
       allowedOrigins: [websiteOrigin],
     });
   assert.equal(created.status, 201, JSON.stringify(created.body));
   assistantId = created.body.assistant._id;
   publicKey = created.body.assistant.publicKey;
+  assert.equal(created.body.assistant.bookingNameRequired, true);
+  assert.equal(created.body.assistant.defaultAppointmentDurationMinutes, 30);
+  assert.equal((await request(app).patch(`/api/organizations/${orgA}/assistants/${assistantId}`)
+    .set(dashboardHeaders).set("Cookie", cookieA).send({ tone: "concierge", bookingNameRequired: false })).body.assistant.tone, "concierge");
+  assert.equal((await request(app).patch(`/api/organizations/${orgA}/assistants/${assistantId}`)
+    .set(dashboardHeaders).set("Cookie", cookieA).send({ defaultAppointmentDurationMinutes: 7 })).status, 422);
   assert.equal(
     (
       await request(app)
@@ -239,6 +247,146 @@ test("assistant ownership and cross-tenant authorization", async () => {
   );
 });
 
+test("four product modes persist and Automatic executes through the durable queue with actual model accounting", async () => {
+  const isolated = await Organization.create({ name: "Synthetic routing organization", dailyBudgetMicros: 10000000, monthlyBudgetMicros: 100000000 });
+  const orgA = isolated._id.toString();
+  const owner = await User.findOne({ email: "alice@example.test" });
+  await Membership.create({ organizationId: orgA, userId: owner!._id, role: "owner" });
+  const { Assistant } = await import("../src/models/index.js");
+  const { processWidgetRequest } = await import("../src/services/widget-queue.js");
+  const { createOpenAIResponder } = await import("../src/services/ai.js");
+  process.env.AI_ENABLED_MODELS = "gpt-6-luna,gpt-6.1-sol,gpt-6-astra";
+  process.env.AI_VERIFIED_MODELS = "gpt-6-luna,gpt-6.1-sol";
+  const org = await Organization.findById(orgA).lean();
+  let automaticId = "";
+  try {
+    for (const choice of ["normal", "powerful", "automatic", "very_powerful"]) {
+      const response = await request(app).post(`/api/organizations/${orgA}/assistants`).set(dashboardHeaders).set("Cookie", cookieA)
+        .send({ name: "Synthetic product mode", instructions: "Answer only verified questions.", allowedOrigins: [], modelSelection: { mode: "product", choice } });
+      assert.equal(response.status, choice === "very_powerful" ? 422 : 201);
+      if (choice === "automatic") automaticId = response.body.assistant._id;
+      if (response.status === 201) {
+        assert.deepEqual(response.body.assistant.modelSelection, { mode: "product", choice });
+        assert.equal((await Assistant.findById(response.body.assistant._id))?.modelSelection.choice, choice);
+        assert.equal((await request(app).patch(`/api/organizations/${orgA}/assistants/${response.body.assistant._id}`)
+          .set(dashboardHeaders).set("Cookie", cookieB).send({ modelSelection: { mode: "product", choice: "normal" } })).status, 403);
+      }
+    }
+    for (const choice of ["normal", "powerful", "automatic"]) {
+      const patched = await request(app).patch(`/api/organizations/${orgA}/assistants/${automaticId}`)
+        .set(dashboardHeaders).set("Cookie", cookieA).send({ modelSelection: { mode: "product", choice } });
+      assert.equal(patched.status, 200);
+      assert.equal((await Assistant.findById(automaticId))?.modelSelection.choice, choice);
+    }
+    assert.equal((await request(app).patch(`/api/organizations/${orgA}/assistants/${automaticId}`)
+      .set(dashboardHeaders).set("Cookie", cookieA).send({ modelSelection: { mode: "product", choice: "very_powerful" } })).status, 422);
+    const options = await request(app).get(`/api/organizations/${orgA}/model-options`).set("Cookie", cookieA);
+    assert.equal(options.body.productModes.find((item: {choice: string}) => item.choice === "very_powerful").available, false);
+    process.env.AI_VERIFIED_MODELS += ",gpt-6-astra";
+    const astra = await request(app).post(`/api/organizations/${orgA}/assistants`).set(dashboardHeaders).set("Cookie", cookieA)
+      .send({ name: "Synthetic Astra", instructions: "Use verified facts only.", allowedOrigins: [],
+        modelSelection: { mode: "product", choice: "very_powerful" } });
+    assert.equal(astra.status, 201);
+    assert.equal((await Assistant.findById(astra.body.assistant._id))?.modelSelection.choice, "very_powerful");
+    let calls = 0;
+    const responder = createOpenAIResponder({ model: "unused", apiKey: "synthetic-only", maxCompletionTokens: 800,
+      fetch: async (_url, init) => {
+        calls++;
+        const body = JSON.parse(String(init?.body));
+        assert.equal(body.model, "gpt-6-luna", "Automatic must not escalate even when premium models are allowed");
+        return new Response(JSON.stringify({ id: "resp_synthetic", object: "response", output_text: "Synthetic verified reply", status: "completed", model: body.model, service_tier: "default",
+          output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "Synthetic verified reply", annotations: [] }] }],
+          usage: { input_tokens: 10, output_tokens: 5, input_tokens_details: { cached_tokens: 0 } } }),
+          { headers: { "content-type": "application/json" } });
+      } });
+    const send = async () => {
+      const conversation = await Conversation.create({ organizationId: orgA, assistantId: automaticId, visitorId: "synthetic-router" });
+      const queued = await WidgetRequest.create({ organizationId: orgA, assistantId: automaticId, conversationId: conversation._id,
+        visitorId: "synthetic-router", clientMessageId: crypto.randomUUID(), text: "Explain how this business can help." });
+      await processWidgetRequest(queued._id, responder);
+      return WidgetRequest.findById(queued._id).lean();
+    };
+    await Organization.updateOne({ _id: orgA }, { $set: { dailyBudgetMicros: 10000000, monthlyBudgetMicros: 100000000 }, $unset: { allowedModels: 1 } });
+    const completed = await send();
+    assert.equal(completed?.status, "completed");
+    assert.equal(completed?.aiModel, "gpt-6-luna");
+    assert.equal(completed?.aiRoutingPolicy, "astra-routing-v1");
+    const usage = await UsageEvent.findOne({ requestId: completed?._id }).lean();
+    assert.equal(usage?.model, "gpt-6-luna");
+    assert.equal(usage?.inputTokens, 10);
+    assert.equal(calls, 1);
+    await processWidgetRequest(completed!._id, responder);
+    assert.equal(calls, 1, "completed durable requests cannot repeat a provider call");
+    await Organization.updateOne({ _id: orgA }, { $set: { dailyBudgetMicros: 1 } });
+    assert.equal((await send())?.errorCode, "budget_exhausted");
+    assert.equal(calls, 1);
+    await Organization.updateOne({ _id: orgA }, { $set: { dailyBudgetMicros: 10000000, allowedModels: ["gpt-6.1-sol"] } });
+    assert.equal((await send())?.status, "failed");
+    assert.equal(calls, 1);
+    await Organization.updateOne({ _id: orgA }, { $unset: { allowedModels: 1 } });
+    process.env.AI_ENABLED_MODELS = "gpt-6.1-sol";
+    assert.equal((await send())?.status, "failed");
+    assert.equal(calls, 1);
+    process.env.AI_ENABLED_MODELS = "gpt-6-luna,gpt-6.1-sol";
+    delete process.env.AI_VERIFIED_MODELS;
+    assert.equal((await send())?.status, "failed");
+    assert.equal(calls, 1);
+  } finally {
+    await Organization.updateOne({ _id: orgA }, { $set: { dailyBudgetMicros: org!.dailyBudgetMicros, monthlyBudgetMicros: org!.monthlyBudgetMicros }, $unset: { allowedModels: 1 } });
+    delete process.env.AI_ENABLED_MODELS;
+    delete process.env.AI_VERIFIED_MODELS;
+  }
+});
+
+test("assistant model profiles validate, persist, isolate tenants and reject stale updates", async () => {
+  process.env.AI_ENABLED_MODELS = "gpt-6-luna,gpt-6.1-terra,gpt-6.1-sol";
+  try {
+    const base = `/api/organizations/${orgA}/assistants`;
+    const options = await request(app).get(`/api/organizations/${orgA}/model-options`).set("Cookie", cookieA);
+    assert.equal(options.status, 200);
+    assert.equal(options.body.defaultSelection.profile, "balanced");
+    assert.equal((await request(app).get(`/api/organizations/${orgA}/model-options`).set("Cookie", cookieB)).status, 403);
+    for (const profile of ["economical", "balanced", "advanced"]) {
+      const created = await request(app).post(base).set(dashboardHeaders).set("Cookie", cookieA).send({
+        name: `${profile} test assistant`, instructions: "Help this synthetic visitor safely.", allowedOrigins: [],
+        modelSelection: { mode: "preset", profile },
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      assert.equal(created.body.assistant.modelSelection.profile, profile);
+      const id = created.body.assistant._id;
+      assert.equal((await request(app).patch(`${base}/${id}`).set(dashboardHeaders).set("Cookie", cookieB)
+        .send({ modelSelection: { mode: "preset", profile: "advanced" } })).status, 403);
+      if (profile === "balanced") {
+        const custom = await request(app).patch(`${base}/${id}`).set(dashboardHeaders).set("Cookie", cookieA).send({
+          settingsVersion: 0, modelSelection: { mode: "custom", profile: "balanced", model: "gpt-6.1-terra",
+            reasoningEffort: "low", processingTier: "default" },
+        });
+        assert.equal(custom.status, 200);
+        assert.equal(custom.body.assistant.modelSelection.reasoningEffort, "low");
+        assert.equal((await request(app).patch(`${base}/${id}`).set(dashboardHeaders).set("Cookie", cookieA)
+          .send({ settingsVersion: 0, modelSelection: { mode: "preset", profile: "economical" } })).status, 409);
+        assert.equal((await request(app).patch(`${base}/${id}`).set(dashboardHeaders).set("Cookie", cookieA)
+          .send({ modelSelection: { mode: "preset", profile: "balanced" } })).status, 200);
+      }
+    }
+    assert.equal((await request(app).post(base).set(dashboardHeaders).set("Cookie", cookieA).send({
+      name: "Default profile", instructions: "Help this synthetic visitor safely.", allowedOrigins: [],
+    })).body.assistant.modelSelection.profile, "balanced");
+    assert.equal((await request(app).patch(`${base}/${assistantId}`).set(dashboardHeaders).set("Cookie", cookieA)
+      .send({ modelSelection: { mode: "custom", profile: "advanced", model: "gpt-6.1-sol",
+        reasoningEffort: "none", processingTier: "default" } })).status, 422);
+    assert.equal((await request(app).patch(`${base}/${assistantId}`).set(dashboardHeaders).set("Cookie", cookieA)
+      .send({ modelSelection: { mode: "custom", profile: "balanced", model: "gpt-6.1-terra",
+        reasoningEffort: "medium", processingTier: "priority" } })).status, 422);
+    await Organization.updateOne({ _id: orgA }, { $set: { allowedModels: ["gpt-6-luna"] } });
+    assert.equal((await request(app).patch(`${base}/${assistantId}`).set(dashboardHeaders).set("Cookie", cookieA)
+      .send({ modelSelection: { mode: "preset", profile: "advanced" } })).status, 422);
+  } finally {
+    await Organization.updateOne({ _id: orgA }, { $unset: { allowedModels: 1 } });
+    delete process.env.AI_ENABLED_MODELS;
+  }
+});
+
 test("widget origin, visitor isolation, AI usage and handoff", async () => {
   assert.equal(
     (
@@ -254,6 +402,7 @@ test("widget origin, visitor isolation, AI usage and handoff", async () => {
     .set(websiteHeaders)
     .send({ publicKey });
   assert.equal(started.status, 201, JSON.stringify(started.body));
+  assert.match(started.headers["access-control-expose-headers"] ?? "", /Retry-After/);
   widgetToken = started.body.token;
   const sent = await request(app)
     .post("/api/widget/messages")
@@ -405,6 +554,25 @@ test("rate limit is shared across API instances", async () => {
   assert.ok(blocked.headers["retry-after"]);
 });
 
+test("ordinary widget polling cannot exhaust the message submission quota", async () => {
+  const session = await request(app).post("/api/widget/sessions").set(websiteHeaders).send({ publicKey });
+  assert.equal(session.status, 201);
+  const headers = { ...websiteHeaders, Authorization: `Bearer ${session.body.token}` };
+  const first = await request(app).post("/api/widget/messages").set(headers)
+    .send({ text: "Start a separate chat", clientMessageId: crypto.randomUUID() });
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+  for (let index = 0; index < 45; index++) {
+    const path = index % 3 === 0 ? "/api/widget/sessions/current" : index % 3 === 1
+      ? `/api/widget/conversations/${first.body.conversationId}/messages` : "/api/widget/actions/pending";
+    const poll = await request(app).get(path).set(headers);
+    assert.equal(poll.status, 200, `poll ${index}: ${JSON.stringify(poll.body)}`);
+  }
+  const sent = await request(app).post("/api/widget/messages").set(headers)
+    .send({ text: "Second message after polling", conversationId: first.body.conversationId, clientMessageId: crypto.randomUUID() });
+  assert.equal(sent.status, 201, JSON.stringify(sent.body));
+  assert.equal(Number(sent.headers["ratelimit-limit"]), 10);
+});
+
 test("daily and monthly budgets reject concurrent AI requests across visitors", async () => {
   const instructions = "Answer Beta Shop customers accurately and briefly.";
   const assistant = await request(app)
@@ -425,7 +593,7 @@ test("daily and monthly budgets reject concurrent AI requests across visitors", 
     staffUsers.map((user) => ({ name: user.name, id: user._id.toString() })));
   const reserve = maximumReservationMicros(fullInstructions, [
     { role: "customer", text },
-  ]);
+  ], (await import("../src/services/model-config.js")).resolveModel(assistant.body.assistant.modelSelection));
   const dollars = (reserve / 1_000_000).toFixed(6);
   const configured = await request(app)
     .patch(`/api/organizations/${orgB}/budgets`)
@@ -838,8 +1006,11 @@ test("owner export is tenant scoped and retention removes expired conversations"
     organizationId: orgA,
     assistantId,
     visitorId: "old-visitor",
+    workflow: { visitorName: "Synthetic private name",
+      visitorNameSourceRequestId: new mongoose.Types.ObjectId(), pendingQuestion: "customer_name" },
     updatedAt: new Date("2020-01-01"),
   });
+  assert.equal((await Conversation.findById(old._id).lean())?.workflow?.visitorName, "Synthetic private name");
   await Message.create({
     organizationId: orgA,
     conversationId: old._id,

@@ -5,10 +5,12 @@ import { logger, safeError } from "./config/logger.js";
 import { startWidgetWorker } from "./services/widget-queue.js";
 import { openAIResponder } from "./services/ai.js";
 import { startRetentionWorker } from "./services/retention.js";
+import { startTelegramDeliveryWorker } from "./services/channels/telegram-service.js";
 try {
   await mongoose.connect(env.mongoUrl);
   const stopWorker = startWidgetWorker(openAIResponder);
   const stopRetention = startRetentionWorker();
+  const stopTelegram = startTelegramDeliveryWorker();
   const server = createApp().listen(env.port, () =>
     logger.info({ port: env.port }, "API listening"),
   );
@@ -19,6 +21,7 @@ try {
   const shutdown = () => {
     stopWorker();
     stopRetention();
+    stopTelegram();
     server.close(async () => {
       await mongoose.disconnect();
       process.exit(0);

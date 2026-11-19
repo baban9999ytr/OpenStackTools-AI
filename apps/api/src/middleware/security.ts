@@ -79,13 +79,16 @@ export const requireMembership =
 export const requireWidgetSession: RequestHandler = async (req, res, next) => {
   const header = req.get("authorization");
   const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
-  if (!token || req.get("origin") === undefined) {
+  const suppliedOrigin = req.get("origin");
+  const sameOriginGet = req.method === "GET" && req.get("sec-fetch-site") === "same-origin" && Boolean(req.get("host"));
+  const origin = suppliedOrigin ?? (sameOriginGet ? `${req.protocol}://${req.get("host")}` : undefined);
+  if (!token || !origin) {
     res.status(401).json({ error: "Widget session required" });
     return;
   }
   const session = await WidgetSession.findOne({
     tokenHash: tokenHash(token),
-    origin: req.get("origin"),
+    origin,
     expiresAt: { $gt: new Date() },
   }).lean();
   if (!session) {

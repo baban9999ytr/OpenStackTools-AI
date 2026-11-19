@@ -17,6 +17,16 @@ small, .muted { color: var(--ost-muted); }
 small { font-size: .78rem; }
 code { font-family: var(--ost-font-mono); font-size: .8rem; overflow-wrap: anywhere; background: var(--ost-surface-soft); padding: .2rem .35rem; border-radius: var(--ost-radius-sm); }
 label { display: grid; gap: var(--ost-space-2); font-size: .88rem; font-weight: 600; margin-bottom: var(--ost-space-4); }
+.model-settings { min-width: 0; border: 1px solid var(--ost-border); border-radius: .75rem; padding: 1rem; margin: 1rem 0; }
+.model-profile-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; }
+.model-profile { min-width: 0; padding: .9rem; border: 1px solid var(--ost-border); border-radius: .7rem; background: var(--ost-surface-soft); cursor: pointer; }
+.model-profile.selected { border-color: var(--ost-accent); box-shadow: 0 0 0 2px var(--ost-accent); }
+.model-profile:has(input:disabled) { opacity: .6; cursor: not-allowed; }
+.model-profile:focus-within { outline: 2px solid var(--ost-accent); outline-offset: 2px; }
+.model-profile span, .model-profile small { display: block; }
+.model-settings details { margin-top: 1rem; }
+.model-settings summary { cursor: pointer; font-weight: 700; }
+@media (max-width: 760px) { .model-profile-grid { grid-template-columns: 1fr; } }
 input, textarea, select { width: 100%; border: 1px solid var(--ost-border); border-radius: var(--ost-radius-md); padding: .72rem .8rem; color: var(--ost-text); background: var(--ost-surface); }
 input:focus, textarea:focus, select:focus { border-color: var(--ost-accent); }
 textarea { resize: vertical; }
@@ -86,6 +96,12 @@ button:not(.text-button):not(.secondary):not(.nav-active):not(.mobile-menu):hove
 .checkbox-label input { width: auto; }
 .receptionist-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; align-items: start; }
 .business-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; align-items: start; }
+.channels-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; align-items: start; }
+.channels-grid > .error, .channels-grid > .notice { grid-column: 1 / -1; margin: 0; }
+.channel-card { min-width: 0; }
+.channel-controls, .channel-wizard { display: grid; gap: .75rem; margin-top: 1rem; }
+.channel-wizard ol { padding-left: 1.5rem; }
+.channel-card input, .channel-card select { max-width: 100%; }
 .business-grid > .error, .business-grid > .notice { grid-column: 1 / -1; margin: 0; }
 .business-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; }
 .business-rows { border: 1px solid var(--ost-border); border-radius: var(--ost-radius-md); margin: 1rem 0; padding: .8rem; }
@@ -95,7 +111,7 @@ button:not(.text-button):not(.secondary):not(.nav-active):not(.mobile-menu):hove
 .receptionist-grid > .error, .receptionist-grid > .notice { grid-column: 1 / -1; margin: 0; }
 .schedule-row { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(90px, .7fr) minmax(90px, .7fr) auto; gap: .45rem; margin-bottom: .6rem; align-items: center; }
 .schedule-row input, .schedule-row select { min-width: 0; }
-@media (max-width: 1100px) { .receptionist-grid, .business-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .receptionist-grid, .business-grid, .channels-grid { grid-template-columns: 1fr; } }
 @media (max-width: 520px) { .business-pair { grid-template-columns: 1fr; } }
 @media (max-width: 520px) { .schedule-row { grid-template-columns: 1fr 1fr; } .schedule-row select, .schedule-row button { grid-column: 1 / -1; } }
 @media (max-width: 1000px) { .grid-two, .inbox-layout { grid-template-columns: 1fr; } .sidebar { width: 210px; flex-basis: 210px; } }

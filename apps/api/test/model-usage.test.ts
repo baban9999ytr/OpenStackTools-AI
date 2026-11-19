@@ -85,6 +85,6 @@ test("action registry rejects unknown names, extra fields and unsupported durati
 
 test("confirmed action replies follow the widget session language", () => {
   assert.match(actionReply({ name: "create_appointment", status: "pending", locale: "tr" }), /Henüz randevu oluşturulmadı/);
-  assert.match(actionReply({ name: "create_appointment", status: "completed", locale: "tr", result: { appointmentId: "123" } }), /Randevu onaylandı/);
+  assert.match(actionReply({ name: "create_appointment", status: "completed", locale: "tr", result: { appointmentId: "123" } }), /Randevunuz oluşturuldu/);
   assert.match(actionReply({ name: "create_appointment", status: "pending", locale: "en" }), /No booking has been made/);
 });

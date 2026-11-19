@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import request from "supertest";
+import { spawnSync } from "node:child_process";
 
 process.env.NODE_ENV = "production";
 process.env.MONGODB_URL = "mongodb://127.0.0.1:27017/unused-test";
@@ -36,4 +37,12 @@ test("production cookie and links remain host-only, secure, and same-origin", as
   assert.equal((await request(app).post("/mutation").set("Origin", "https://foreign.example.invalid").set("X-Requested-With", "XMLHttpRequest")).status, 403);
   assert.equal((await request(app).post("/mutation").set("Origin", env.dashboardOrigin)).status, 403);
   assert.equal((await request(app).post("/mutation").set("Origin", env.dashboardOrigin).set("X-Requested-With", "XMLHttpRequest")).status, 204);
+});
+
+test("models without Chat Completions tool calling fail at startup", () => {
+  const checked = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e",
+    `import ${JSON.stringify(new URL("../src/config/env.ts", import.meta.url).href)}`],
+  { env: { ...process.env, OPENAI_MODEL: "gpt-6.1-sol", OPENAI_REASONING_EFFORT: "medium" }, encoding: "utf8" });
+  assert.notEqual(checked.status, 0);
+  assert.match(checked.stderr, /requires a Responses API adapter/);
 });

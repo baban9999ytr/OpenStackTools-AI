@@ -1,7 +1,9 @@
+import { evaluateBusinessContinuity, businessScenarios } from "./business-continuity.js";
 import assert from "node:assert/strict";
 import { scenarios } from "./scenarios.js";
 import { runEvaluation } from "./runner.js";
 import { scoreReply } from "./scoring.js";
+import { evaluateContinuity, continuityScenarios } from "./continuity.js";
 
 assert.equal(scenarios.length, 68);
 assert.equal(new Set(scenarios.map((scenario) => scenario.id)).size, scenarios.length);
@@ -25,4 +27,5 @@ assert.equal(leak.factuality, false);
 
 const summary = await runEvaluation();
 console.log(JSON.stringify(summary, null, 2));
+console.log(JSON.stringify({ continuity: await evaluateContinuity(), business: evaluateBusinessContinuity(), totalScenarioCount: scenarios.length + continuityScenarios.length + businessScenarios.length }, null, 2));
 if (summary.model.passed !== summary.total || summary.backend.passed !== 64 || summary.backend.skipped !== 4 || summary.backend.failed) process.exitCode = 1;

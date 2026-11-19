@@ -3,11 +3,11 @@ import { RateCounter } from "../models/index.js";
 import { tokenHash } from "../services/tokens.js";
 
 export const distributedLimit =
-  (scope: string, limit: number, windowMs: number): RequestHandler =>
+  (scope: string, limit: number, windowMs: number, identity?: (req: Parameters<RequestHandler>[0], res: Parameters<RequestHandler>[1]) => string): RequestHandler =>
   async (req, res, next) => {
     const bucket = Math.floor(Date.now() / windowMs);
     const key = tokenHash(
-      `${scope}:${req.ip ?? req.socket.remoteAddress}:${bucket}`,
+      `${scope}:${identity?.(req, res) ?? req.ip ?? req.socket.remoteAddress}:${bucket}`,
     );
     const expiresAt = new Date((bucket + 1) * windowMs + 60_000);
     try {
@@ -44,4 +44,13 @@ export const distributedLimit =
 
 export const generalLimit = distributedLimit("general", 120, 60_000);
 export const authLimit = distributedLimit("auth", 15, 15 * 60_000);
-export const widgetLimit = distributedLimit("widget", 30, 60_000);
+const widgetSessionId = (_req: Parameters<RequestHandler>[0], res: Parameters<RequestHandler>[1]) =>
+  res.locals.widgetSession._id.toString() as string;
+// Broad IP guard covers invalid tokens; authenticated read polling has its own
+// quota and never spends the AI submission allowance.
+export const widgetAbuseLimit = distributedLimit("widget-abuse", 600, 60_000);
+export const widgetSessionLimit = distributedLimit("widget-session-create", 20, 15 * 60_000);
+export const widgetReadLimit = distributedLimit("widget-read", 120, 60_000, widgetSessionId);
+export const widgetMessageLimit = distributedLimit("widget-message", 10, 60_000, widgetSessionId);
+export const widgetMessageIpLimit = distributedLimit("widget-message-ip", 30, 60_000);
+export const widgetMutationLimit = distributedLimit("widget-mutation", 20, 60_000, widgetSessionId);

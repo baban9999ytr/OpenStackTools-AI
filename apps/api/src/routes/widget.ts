@@ -9,11 +9,12 @@ import {
   WidgetRequest,
   WidgetSession,
 } from "../models/index.js";
-import { ActionError, actionReply, confirmAction } from "../services/agent-actions.js";
+import { ActionError, actionReply } from "../services/agent-actions.js";
+import { confirmActionWithButton } from "../services/universal-confirmation.js";
 import { AppointmentError } from "../services/appointments.js";
 import { validate } from "../middleware/validate.js";
 import { requireWidgetSession } from "../middleware/security.js";
-import { widgetLimit } from "../middleware/limits.js";
+import { widgetAbuseLimit, widgetSessionLimit, widgetReadLimit, widgetMessageLimit, widgetMessageIpLimit, widgetMutationLimit } from "../middleware/limits.js";
 import { newToken, tokenHash } from "../services/tokens.js";
 import type { AIResponder } from "../services/ai.js";
 import {
@@ -25,9 +26,10 @@ import {
 
 export const widgetRoutes = (respond: AIResponder) => {
   const router = Router();
-  router.use(widgetLimit);
+  router.use(widgetAbuseLimit);
   router.post(
     "/sessions",
+    widgetSessionLimit,
     validate(
       z.strictObject({ publicKey: z.string().startsWith("ost_").max(64), locale: z.enum(["en", "tr"]).optional() }),
     ),
@@ -63,7 +65,7 @@ export const widgetRoutes = (respond: AIResponder) => {
         .json({ token, expiresAt, assistant: { name: assistant.name } });
     },
   );
-  router.get("/sessions/current", requireWidgetSession, async (_req, res) => {
+  router.get("/sessions/current", requireWidgetSession, widgetReadLimit, async (_req, res) => {
     const session = res.locals.widgetSession;
     const assistant = await Assistant.findOne({
       _id: session.assistantId,
@@ -83,6 +85,7 @@ export const widgetRoutes = (respond: AIResponder) => {
   router.get(
     "/conversations/:conversationId/messages",
     requireWidgetSession,
+    widgetReadLimit,
     async (req, res) => {
       const session = res.locals.widgetSession;
       if (!isValidObjectId(req.params.conversationId)) {
@@ -132,7 +135,7 @@ export const widgetRoutes = (respond: AIResponder) => {
       action: action ? { id: action._id, name: action.name, status: action.status, result: action.result, expiresAt: action.expiresAt } : null,
     };
   };
-  router.get("/actions/pending", requireWidgetSession, async (_req, res) => {
+  router.get("/actions/pending", requireWidgetSession, widgetReadLimit, async (_req, res) => {
     const session = res.locals.widgetSession;
     const actions = await AgentAction.find({ organizationId: session.organizationId,
       assistantId: session.assistantId, visitorId: session.visitorId,
@@ -147,15 +150,15 @@ export const widgetRoutes = (respond: AIResponder) => {
       name: action.name, arguments: action.arguments, expiresAt: action.expiresAt,
     })) });
   });
-  router.post("/actions/:actionId/confirm", requireWidgetSession, async (req, res) => {
+  router.post("/actions/:actionId/confirm", requireWidgetSession, widgetMutationLimit, async (req, res) => {
     const actionId = req.params.actionId;
     if (typeof actionId !== "string" || !isValidObjectId(actionId)) { res.status(400).json({ error: "Invalid action" }); return; }
     const widget = res.locals.widgetSession;
     try {
-      const action = await confirmAction({ organizationId: widget.organizationId,
+      const action = await confirmActionWithButton({ organizationId: widget.organizationId,
         assistantId: widget.assistantId, visitorId: widget.visitorId,
         conversationId: widget.currentConversationId,
-      }, new mongoose.Types.ObjectId(actionId));
+      }, new mongoose.Types.ObjectId(actionId), "web", `website-button:${actionId}`);
       res.json({ action: { id: action._id, name: action.name, status: action.status,
         result: action.result }, message: actionReply(action) });
     } catch (error) {
@@ -165,7 +168,7 @@ export const widgetRoutes = (respond: AIResponder) => {
       throw error;
     }
   });
-  router.post("/actions/:actionId/decline", requireWidgetSession, async (req, res) => {
+  router.post("/actions/:actionId/decline", requireWidgetSession, widgetMutationLimit, async (req, res) => {
     const actionId = req.params.actionId;
     if (typeof actionId !== "string" || !isValidObjectId(actionId)) { res.status(400).json({ error: "Invalid action" }); return; }
     const widget = res.locals.widgetSession;
@@ -175,7 +178,7 @@ export const widgetRoutes = (respond: AIResponder) => {
     if (!action) { res.status(404).json({ error: "Action unavailable" }); return; }
     res.json({ ok: true });
   });
-  router.get("/requests/:requestId", requireWidgetSession, async (req, res) => {
+  router.get("/requests/:requestId", requireWidgetSession, widgetReadLimit, async (req, res) => {
     if (!isValidObjectId(req.params.requestId)) {
       res.status(400).json({ error: "Invalid request" });
       return;
@@ -196,6 +199,8 @@ export const widgetRoutes = (respond: AIResponder) => {
   router.post(
     "/messages",
     requireWidgetSession,
+    widgetMessageIpLimit,
+    widgetMessageLimit,
     validate(
       z.strictObject({
         text: z.string().trim().min(1).max(4000),
@@ -242,6 +247,7 @@ export const widgetRoutes = (respond: AIResponder) => {
             .status(502)
             .json({
               error: "Assistant temporarily unavailable",
+              errorCode: current.errorCode,
               requestId: current._id,
               conversationId: current.conversationId,
             });

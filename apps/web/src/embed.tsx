@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { widgetBrandCss } from "./widget-brand";
 
@@ -23,13 +23,21 @@ type Saved = {
 const css = `${widgetBrandCss}\n:host{font-family:var(--ost-font-sans);color:var(--ost-text)}*{box-sizing:border-box}.ost-launch{position:fixed;right:24px;bottom:24px;z-index:2147483647;border:0;border-radius:999px;background:var(--ost-accent);color:var(--ost-accent-text);padding:16px 20px;font:700 15px var(--ost-font-sans);box-shadow:0 10px 28px #09090b50;cursor:pointer}.ost-panel{position:fixed;right:24px;bottom:82px;z-index:2147483647;width:min(370px,calc(100vw - 32px));height:min(550px,calc(100vh - 110px));display:flex;flex-direction:column;background:var(--ost-surface);color:var(--ost-text);border:1px solid var(--ost-border);border-radius:12px;box-shadow:0 18px 60px #09090b50;overflow:hidden}.ost-head{background:var(--ost-surface-soft);border-bottom:1px solid var(--ost-border);padding:17px 20px;font-weight:700;display:flex;gap:12px;justify-content:space-between;align-items:center}.ost-head small{display:block;color:var(--ost-muted);font-weight:400;margin-top:3px}.ost-head button{background:transparent;color:var(--ost-text);border:1px solid var(--ost-border);border-radius:4px;padding:4px;font:inherit;cursor:pointer}.ost-messages{flex:1;overflow:auto;padding:16px;background:var(--ost-page)}.ost-message{max-width:85%;padding:9px 12px;margin:8px 0;border-radius:8px;background:var(--ost-surface-soft);white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}.ost-message.customer{margin-left:auto;background:var(--ost-accent-subtle)}.ost-form{display:flex;gap:8px;padding:12px;background:var(--ost-surface);border-top:1px solid var(--ost-border)}.ost-form input{flex:1;min-width:0;padding:10px;border:1px solid var(--ost-border);border-radius:8px;background:var(--ost-surface);color:var(--ost-text);font:inherit}.ost-form button{border:0;border-radius:8px;background:var(--ost-accent);color:var(--ost-accent-text);padding:10px 13px;font:700 13px var(--ost-font-sans);cursor:pointer}.ost-form button:disabled{opacity:.6}.ost-error{color:var(--ost-danger);padding:0 14px;font-size:13px}.ost-state{padding:0 14px;font-size:13px}.ost-retry{margin:0 14px 8px;background:var(--ost-surface);color:var(--ost-accent);border:1px solid var(--ost-border);border-radius:4px;padding:6px;cursor:pointer}:focus-visible{outline:2px solid var(--ost-focus);outline-offset:2px}`;
 
 const labels = {
-  en: { assistant: "AI assistant", handoff: "A team member will reply here.", closed: "This conversation is closed.", sending: "Sending message…", waiting: "Waiting for a reply…", failed: "The assistant could not reply. Please try a new message.", uncertain: "Message status is uncertain. Retry uses the same message ID.", terminal: "No AI reply was sent. You can start a new message.", sendError: "Could not send message", connectionError: "Connection failed", lost: "Connection lost", startError: "Could not start chat", close: "Close chat", launch: "Chat with us", chat: "Business chat", privacy: "Messages are shared with this business.", clearLabel: "Clear this chat session", clear: "Clear chat", empty: "How can we help?", retry: "Retry message safely", input: "Your message", placeholder: "Write a message…", send: "Send" },
-  tr: { assistant: "Yapay zekâ asistanı", handoff: "Bir ekip üyesi buradan yanıt verecek.", closed: "Bu görüşme kapandı.", sending: "Mesaj gönderiliyor…", waiting: "Yanıt bekleniyor…", failed: "Asistan yanıt veremedi. Yeni bir mesaj deneyin.", uncertain: "Mesajın durumu belirsiz. Yeniden deneme aynı mesaj kimliğini kullanır.", terminal: "Yapay zekâ yanıtı gönderilmedi. Yeni bir mesaj yazabilirsiniz.", sendError: "Mesaj gönderilemedi", connectionError: "Bağlantı kurulamadı", lost: "Bağlantı koptu", startError: "Sohbet başlatılamadı", close: "Sohbeti kapat", launch: "Bizimle sohbet edin", chat: "İşletme sohbeti", privacy: "Mesajlarınız bu işletmeyle paylaşılır.", clearLabel: "Bu sohbet oturumunu temizle", clear: "Sohbeti temizle", empty: "Nasıl yardımcı olabiliriz?", retry: "Mesajı güvenle yeniden dene", input: "Mesajınız", placeholder: "Mesaj yazın…", send: "Gönder" },
+  en: { assistant: "AI assistant", handoff: "A team member will reply here.", closed: "This conversation is closed.", sending: "Sending message…", waiting: "Waiting for a reply…", failed: "The assistant could not reply. Please try a new message.", uncertain: "Message status is uncertain. Retry uses the same message ID.", terminal: "No AI reply was sent. You can start a new message.", sendError: "Could not send message", connectionError: "Connection failed", lost: "Connection lost", startError: "Could not start chat", rateLimited: "Too many requests right now. Please wait before retrying.", budgetExhausted: "This business has reached its AI usage limit.", modelUnavailable: "The assistant's AI model is unavailable. Please contact the business team.", close: "Close chat", launch: "Chat with us", chat: "Business chat", privacy: "Messages are shared with this business.", clearLabel: "Clear this chat session", clear: "Clear chat", empty: "How can we help?", retry: "Retry message safely", input: "Your message", placeholder: "Write a message…", send: "Send" },
+  tr: { assistant: "Yapay zekâ asistanı", handoff: "Bir ekip üyesi buradan yanıt verecek.", closed: "Bu görüşme kapandı.", sending: "Mesaj gönderiliyor…", waiting: "Yanıt bekleniyor…", failed: "Asistan yanıt veremedi. Yeni bir mesaj deneyin.", uncertain: "Mesajın durumu belirsiz. Yeniden deneme aynı mesaj kimliğini kullanır.", terminal: "Yapay zekâ yanıtı gönderilmedi. Yeni bir mesaj yazabilirsiniz.", sendError: "Mesaj gönderilemedi", connectionError: "Bağlantı kurulamadı", lost: "Bağlantı koptu", startError: "Sohbet başlatılamadı", rateLimited: "Şu anda çok fazla istek var. Yeniden denemeden önce bekleyin.", budgetExhausted: "Bu işletmenin yapay zekâ kullanım sınırına ulaşıldı.", modelUnavailable: "Asistanın yapay zekâ modeli kullanılamıyor. Lütfen işletme ekibiyle iletişime geçin.", close: "Sohbeti kapat", launch: "Bizimle sohbet edin", chat: "İşletme sohbeti", privacy: "Mesajlarınız bu işletmeyle paylaşılır.", clearLabel: "Bu sohbet oturumunu temizle", clear: "Sohbeti temizle", empty: "Nasıl yardımcı olabiliriz?", retry: "Mesajı güvenle yeniden dene", input: "Mesajınız", placeholder: "Mesaj yazın…", send: "Gönder" },
 } as const;
 const actionLabels = {
   en: { confirm: "Confirm action", decline: "Decline", pending: "Review before this action is performed", create_appointment: "Book appointment", reschedule_appointment: "Move appointment", cancel_appointment: "Cancel appointment", create_customer: "Save customer request" },
   tr: { confirm: "İşlemi onayla", decline: "Reddet", pending: "İşlem yapılmadan önce gözden geçirin", create_appointment: "Randevu oluştur", reschedule_appointment: "Randevuyu taşı", cancel_appointment: "Randevuyu iptal et", create_customer: "Müşteri talebini kaydet" },
 } as const;
+class WidgetHttpError extends Error {
+  constructor(public statusCode: number, public retryAfterMs: number, message: string, public code?: string) { super(message); }
+}
+const retryDelay = (header: string | null) => {
+  const seconds = header ? Number(header) : NaN;
+  const delay = Number.isFinite(seconds) ? seconds * 1000 : header ? Date.parse(header) - Date.now() : NaN;
+  return Number.isFinite(delay) ? Math.min(60_000, Math.max(1000, delay)) : 0;
+};
 
 export function Widget({
   publicKey,
@@ -67,6 +75,13 @@ export function Widget({
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [retryAt, setRetryAt] = useState(0);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  useEffect(() => {
+    if (retryAt <= Date.now()) return;
+    const timer = window.setTimeout(() => setRetryAt(0), retryAt - Date.now());
+    return () => window.clearTimeout(timer);
+  }, [retryAt]);
   const save = (next: Saved | null) => {
     if (next) sessionStorage.setItem(storageKey, JSON.stringify(next));
     else sessionStorage.removeItem(storageKey);
@@ -87,23 +102,25 @@ export function Widget({
       setMessages([]);
     }
     if (!response.ok)
-      throw new Error(data.error ?? `Chat unavailable (${response.status})`);
+      throw new WidgetHttpError(response.status, retryDelay(response.headers.get("Retry-After")),
+        typeof data.error === "string" ? data.error : `Chat unavailable (${response.status})`,
+        typeof data.errorCode === "string" ? data.errorCode : undefined);
     return data;
   };
   const refresh = async (state: Saved) => {
     if (!state.conversationId) return;
-    const data = await fetchJson(
-      `/conversations/${state.conversationId}/messages`,
-      state.token,
-    );
-    setMessages(data.messages);
-    const actions = await fetchJson("/actions/pending", state.token).catch(() => ({ actions: [] }));
-    setPendingActions(actions.actions ?? []);
-    if (data.conversation.status === "handoff")
-      setStatus(t.handoff);
-    else if (data.conversation.status === "closed")
-      setStatus(t.closed);
-    else if (!state.pending) setStatus("");
+    if (refreshInFlight.current) return refreshInFlight.current;
+    const work = (async () => {
+      const data = await fetchJson(`/conversations/${state.conversationId}/messages`, state.token);
+      setMessages(data.messages);
+      const actions = await fetchJson("/actions/pending", state.token);
+      setPendingActions(actions.actions ?? []);
+      if (data.conversation.status === "handoff") setStatus(t.handoff);
+      else if (data.conversation.status === "closed") setStatus(t.closed);
+      else if (!state.pending) setStatus("");
+    })();
+    refreshInFlight.current = work;
+    try { await work; } finally { if (refreshInFlight.current === work) refreshInFlight.current = null; }
   };
   const sendPending = async (state: Saved) => {
     if (!state.pending) return;
@@ -127,15 +144,19 @@ export function Widget({
       else setStatus(t.waiting);
       await refresh(next);
     } catch (caught) {
+      if (caught instanceof WidgetHttpError && caught.statusCode === 429) {
+        setRetryAt(Date.now() + (caught.retryAfterMs || 3000));
+        setStatus(t.rateLimited);
+        setError(t.rateLimited);
+        return;
+      }
       const terminal =
-        caught instanceof Error &&
-        (caught.message.includes("budget exhausted") ||
-          caught.message.includes("temporarily unavailable"));
+        caught instanceof WidgetHttpError && [402, 502].includes(caught.statusCode);
       if (terminal)
         save({ ...state, pending: undefined });
-      setError(
-        caught instanceof Error ? caught.message : t.sendError,
-      );
+      setError(caught instanceof WidgetHttpError && caught.statusCode === 402 ? t.budgetExhausted
+        : caught instanceof WidgetHttpError && caught.code === "provider_model_unavailable" ? t.modelUnavailable
+          : terminal ? t.failed : caught instanceof Error ? caught.message : t.sendError);
       setStatus(terminal ? t.terminal : t.uncertain);
     } finally {
       setBusy(false);
@@ -158,10 +179,10 @@ export function Widget({
         if (current.pending && !current.pending.requestId)
           await sendPending(current);
       } catch (caught) {
-        if (!cancelled)
-          setError(
-            caught instanceof Error ? caught.message : t.connectionError,
-          );
+        if (!cancelled) setError(caught instanceof WidgetHttpError && caught.statusCode === 401
+          ? language === "tr" ? "Sohbet oturumu sona erdi. Yeni sohbet başlatın." : "Chat session expired. Start a new chat."
+          : caught instanceof WidgetHttpError && caught.statusCode === 429
+            ? t.rateLimited : caught instanceof Error ? caught.message : t.connectionError);
       }
     };
     void connect();
@@ -171,7 +192,11 @@ export function Widget({
   }, [open, saved?.token]);
   useEffect(() => {
     if (!open || !saved?.conversationId) return;
-    const timer = window.setInterval(async () => {
+    let cancelled = false;
+    let timer: number | undefined;
+    let failures = 0;
+    const poll = async () => {
+      let delay = 3000;
       try {
         const current = readSaved();
         if (!current) return;
@@ -197,12 +222,22 @@ export function Widget({
           }
         }
         await refresh(current);
+        failures = 0;
+        setError("");
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : t.lost);
+        failures++;
+        delay = Math.min(60_000, 3000 * 2 ** Math.min(failures, 4));
+        if (caught instanceof WidgetHttpError && caught.statusCode === 429) {
+          delay = Math.max(delay, caught.retryAfterMs);
+          setError("");
+          setStatus(t.rateLimited);
+        } else setError(t.lost);
       }
-    }, 3000);
-    return () => window.clearInterval(timer);
-  }, [open, saved?.token, saved?.conversationId, saved?.pending?.requestId]);
+      if (!cancelled) timer = window.setTimeout(() => void poll(), delay);
+    };
+    timer = window.setTimeout(() => void poll(), 3000);
+    return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer); };
+  }, [open, saved?.token, saved?.conversationId]);
   async function start() {
     setOpen(true);
     if (saved) return;
@@ -226,6 +261,7 @@ export function Widget({
     setPendingActions([]);
     setStatus("");
     setError("");
+    setRetryAt(0);
     setOpen(false);
   }
   async function send(event: FormEvent<HTMLFormElement>) {
@@ -324,10 +360,16 @@ export function Widget({
               {error}
             </p>
           )}
+          {!saved && !busy && (
+            <button className="ost-retry" type="button" onClick={() => void start()}>
+              {language === "tr" ? "Yeni sohbet başlat" : "Start new chat"}
+            </button>
+          )}
           {saved?.pending && error && (
             <button
               className="ost-retry"
               type="button"
+              disabled={retryAt > Date.now()}
               onClick={() => void sendPending(saved)}
             >
               {t.retry}

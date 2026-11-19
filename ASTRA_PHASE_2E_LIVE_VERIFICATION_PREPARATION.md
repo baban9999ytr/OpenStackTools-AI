@@ -106,3 +106,15 @@ The initial evaluation typecheck caught a duplicate `effort` key in the new sett
 - `apps/api/test/benchmark-admission.test.ts`, `model-profiles.test.ts` and `tenancy.test.ts` verify the new controls.
 - `.github/workflows/ci.yml` adds the offline Luna smoke.
 - `apps/api/evals/README.md`, `PROJECT_ASTRA_ARCHITECTURE_AND_IMPLEMENTATION_REPORT.md` and this report document the experiment.
+
+### Local dotenv launcher
+
+From the repository root, run the provider-free preflight with:
+
+```bash
+NODE_OPTIONS= node --env-file=apps/api/.env apps/api/evals/launch-luna.mjs --preflight
+```
+
+Keep the dotenv file ignored and readable only by your account. Supply the dedicated key under `EVAL_PROJECT_API_KEY`. After verifying the actual project, set `EVAL_DEDICATED_PROJECT_CONFIRMED=1`, `EVAL_VERIFIED_MODELS=gpt-6-luna`, and `EVAL_PROVIDER_PROJECT_LIMIT_REVIEWED=1`. Confirm usable quota as part of the project review. After checking the project's applicable Standard rates against the registry, set `EVAL_STANDARD_PRICING_CONFIRMED=1` and `EVAL_PRICE_CHECKED_AT` to that review's actual UTC timestamp. Public rates alone do not establish project terms.
+
+The launcher passes a restricted environment to the benchmark, fixes the reviewed pricing version and authorized limits, and creates an owner-only report directory. With separate authorization for a billable run, replace `--preflight` with `--execute`. This runs provider-free preflight first and starts one live execution only if it passes. Leave the execution flags out of dotenv.

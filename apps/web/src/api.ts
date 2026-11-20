@@ -17,6 +17,8 @@ export type Assistant = {
   greetingStyle?: "brief" | "standard";
   emojiUsage?: "none" | "minimal";
   bookingNameRequired?: boolean;
+  bookingContactMethod?: "phone" | "email" | "either" | "none";
+  bookingManualHandoff?: boolean;
   defaultAppointmentDurationMinutes?: 15 | 30 | 45 | 60 | 90 | 120;
   publicKey: string;
   allowedOrigins: string[];

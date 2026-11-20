@@ -58,8 +58,10 @@ test("assistant response length is accessible and persists through editing in bo
   await page.getByRole("combobox", { name: "Conversation strategy" }).selectOption("real_estate");
   await page.getByRole("combobox", { name: "Tone" }).selectOption("concierge");
   await page.getByRole("combobox", { name: "Default viewing duration" }).selectOption("60");
-  await page.getByRole("checkbox", { name: "Ask for a booking name" }).check();
+  await page.getByRole("combobox", { name: "Ask for a booking name" }).selectOption("yes");
+  await page.getByRole("combobox", { name: "Booking contact method" }).selectOption("email");
   await page.getByRole("button", { name: "Save changes" }).click();
+  await expect.poll(() => (assistant as typeof assistant & { bookingContactMethod?: string }).bookingContactMethod).toBe("email");
   await expect.poll(() => assistant.responseLength).toBe("detailed");
   await expect.poll(() => (assistant as typeof assistant & {conversationStrategy?: string}).conversationStrategy).toBe("real_estate");
   await expect.poll(() => assistant.tone).toBe("concierge");

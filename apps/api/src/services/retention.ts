@@ -80,6 +80,8 @@ export const runRetention = async (now = new Date()) => {
     await ChannelDelivery.deleteMany({ organizationId: organization._id, createdAt: { $lt: cutoff }, status: { $in: ["sent", "failed", "uncertain"] } });
     await ActionConfirmationAudit.deleteMany({ organizationId: organization._id, createdAt: { $lt: cutoff } });
     await InteractionToken.deleteMany({ organizationId: organization._id, expiresAt: { $lt: now } });
+    await Conversation.updateMany({ organizationId: organization._id, "bookingIntake.expiresAt": { $lte: now },
+      processingRequestId: { $exists: false } }, { $unset: { bookingIntake: 1 } });
     await Customer.deleteMany({ organizationId: organization._id, updatedAt: { $lt: cutoff } });
     await Listing.deleteMany({ organizationId: organization._id, archivedAt: { $lt: cutoff } });
     const oldAppointments = await Appointment.find({ organizationId: organization._id, endAt: { $lt: cutoff } }).select("_id").lean();

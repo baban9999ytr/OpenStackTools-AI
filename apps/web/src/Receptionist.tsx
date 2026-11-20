@@ -5,7 +5,7 @@ import { usePreferences } from "./preferences";
 type Window = { day: number; startMinute: number; endMinute: number };
 type Staff = { id: string; name: string; windows: Window[]; viewingEnabled?: boolean };
 type Config = { timeZone: string; openingHours: Window[]; staff: Staff[] };
-type Appointment = { _id: string; staffId: string; startAt: string; endAt: string; status: string };
+type Appointment = { _id: string; staffId: string; startAt: string; endAt: string; status: string; visitorName?: string; contact?: string; contactMethod?: "phone" | "email"; listingTitle?: string };
 type Customer = { _id: string; name: string; contact: string; request: string; updatedAt: string };
 type Action = { _id: string; name: string; status: string; createdAt: string;
   result?: { listingTitle?: string; staffName?: string; startAt?: string; durationMinutes?: number } };
@@ -112,6 +112,9 @@ export function Receptionist({ organizationId, role }: { organizationId: string;
       {appointments.map((item) => <div className="list-item" key={item._id}>
         <strong>{new Date(item.startAt).toLocaleString(locale, { timeZone, timeZoneName: "shortOffset" })}</strong>
         <span>{config?.staff.find((staff) => staff.id === item.staffId)?.name ?? t("Staff")} · {t(item.status)}</span>
+        {item.listingTitle && <span>{item.listingTitle}</span>}
+        {item.visitorName && <span>{item.visitorName}</span>}
+        {item.contact && <span>{item.contactMethod === "phone" ? (locale === "tr" ? "Telefon" : "Phone") : (locale === "tr" ? "E-posta" : "Email")}: {item.contact}</span>}
         {canAct && item.status === "booked" && <button className="secondary" disabled={busy} onClick={() => void cancel(item._id)}>{t("Cancel appointment")}</button>}
       </div>)}
     </section>

@@ -1,6 +1,7 @@
+import { requiresBookingIntake, readyIntake, type BookingIntake } from "./booking-intake.js";
 import mongoose from "mongoose";
 import { z } from "zod";
-import { AgentAction, Appointment, AppointmentSlot, Conversation, Customer, Listing, Message, Organization, User, WidgetRequest } from "../models/index.js";
+import { AgentAction, Assistant, Appointment, AppointmentSlot, Conversation, Customer, Listing, Message, Organization, User, WidgetRequest } from "../models/index.js";
 import { AppointmentError, appointmentSlots, appointmentTimeSchema, assertBookable, inspectAvailability, changeAppointment, durationSchema, reserveAppointment } from "./appointments.js";
 import { listingFilters, retrieveKnowledge, searchListings } from "./business-data.js";
 import { formatListingReply, type VerifiedListing } from "./customer-listings.js";
@@ -52,12 +53,19 @@ export type ActionContext = {
 };
 const needsConfirmation = (name: ActionName) => !["check_availability", "handoff_to_human", "get_business_knowledge", "search_listings"].includes(name);
 
-export const stageAction = async (context: ActionContext, call: ActionCall, idempotencyKey: string) => {
+export const stageAction = async (context: ActionContext, call: ActionCall, idempotencyKey: string, consentedIntake?: BookingIntake) => {
   const parsed = parseAction(call.name, call.arguments);
   const existing = await AgentAction.findOne({ organizationId: context.organizationId, idempotencyKey }).lean();
   if (existing) {
     if (existing.name !== parsed.name || JSON.stringify(existing.arguments) !== JSON.stringify(parsed.arguments)) throw new ActionError("action_conflict");
     return existing;
+  }
+  let bookingIntakeRequired = false;
+  if (parsed.name === "create_appointment" && context.visitorId) {
+    const assistant = await Assistant.findOne({ _id: context.assistantId, organizationId: context.organizationId }).lean();
+    bookingIntakeRequired = requiresBookingIntake(assistant);
+    if (assistant && bookingIntakeRequired && !readyIntake(consentedIntake, assistant, parsed.arguments as z.infer<typeof actionSchemas.create_appointment>))
+      throw new ActionError("confirmation_required");
   }
   if (parsed.name === "handoff_to_human") {
     if (!context.conversationId || !context.visitorId) throw new ActionError("action_unavailable");
@@ -141,7 +149,7 @@ export const stageAction = async (context: ActionContext, call: ActionCall, idem
   }
   try {
     return await AgentAction.create({ ...context, name: parsed.name, arguments: parsed.arguments,
-      result, status, idempotencyKey,
+      result, status, idempotencyKey, ...(bookingIntakeRequired ? { bookingIntakeRequired: true } : {}),
       ...(status === "pending" ? { expiresAt: new Date(Date.now() + 15 * 60_000) } : {}),
     });
   } catch (error) {
@@ -180,10 +188,39 @@ export const confirmAction = async (context: ActionContext, actionId: mongoose.T
         const args = parsed.arguments as z.infer<typeof actionSchemas.create_appointment>;
         if (args.listingId && !await Listing.exists({ _id: args.listingId, organizationId: context.organizationId,
           archivedAt: { $exists: false }, availability: "available" }).session(session)) throw new ActionError("action_unavailable");
+        let customerId: mongoose.Types.ObjectId | undefined;
+        let visitorName = args.customerName;
+        if (action.visitorId) {
+          const assistant = await Assistant.findOne({ _id: action.assistantId, organizationId: context.organizationId }).session(session).lean();
+          if (action.bookingIntakeRequired || requiresBookingIntake(assistant)) {
+            if (!assistant || !action.conversationId) throw new ActionError("action_unavailable");
+            const scope = { organizationId: context.organizationId, conversationId: action.conversationId, visitorId: action.visitorId };
+            const conversationScope = { _id: action.conversationId, organizationId: scope.organizationId, visitorId: scope.visitorId,
+              assistantId: assistant._id, status: "bot" as const };
+            const conversation = await Conversation.findOne(conversationScope).select("+bookingIntake").session(session).lean();
+            const draft = readyIntake(conversation?.bookingIntake, assistant, args);
+            if (!draft || draft.actionId !== action._id.toString()) throw new ActionError("confirmation_required");
+            visitorName = draft.name;
+            if (draft.contact && draft.method && draft.consentAt) {
+              const existing = await Customer.findOne(scope).session(session);
+              if (existing && (existing.contact !== draft.contact || (draft.name && existing.name !== draft.name)))
+                throw new ActionError("action_conflict");
+              const customer = existing ?? new Customer({ ...scope, identityKey: `${scope.conversationId}:${scope.visitorId}`,
+                name: draft.name ?? (action.locale === "tr" ? "Randevu ziyaretçisi" : "Viewing visitor"),
+                contact: draft.contact, request: action.locale === "tr" ? "Emlak gösterimi" : "Property viewing" });
+              customer.bookingContactMethod = draft.method;
+              customer.bookingConsentAt = draft.consentAt;
+              await customer.save({ session });
+              customerId = customer._id;
+              visitorName = undefined;
+            }
+            await Conversation.updateOne(conversationScope, { $unset: { bookingIntake: 1 } }, { session });
+          }
+        }
         const appointment = await reserveAppointment({ organizationId: context.organizationId,
           staffId: new mongoose.Types.ObjectId(args.staffId), startAt: new Date(args.startAt),
           durationMinutes: args.durationMinutes, visitorId: action.visitorId ?? undefined,
-          visitorName: args.customerName,
+          visitorName, customerId,
           ...(args.listingId ? { listingId: new mongoose.Types.ObjectId(args.listingId) } : {}),
           conversationId: action.conversationId ?? undefined, createdBy: action.visitorId ? "widget" : "staff",
         }, session);

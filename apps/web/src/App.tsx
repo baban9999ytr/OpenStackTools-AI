@@ -380,7 +380,10 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
           ...(modelSelection ? { modelSelection } : {}),
           defaultLanguage: data.get("defaultLanguage"), tone: data.get("tone"),
           greetingStyle: data.get("greetingStyle"), emojiUsage: data.get("emojiUsage"),
-          bookingNameRequired: data.get("bookingNameRequired") === "on",
+          bookingNameRequired: data.get("bookingNameRequired") === "default" ?
+            (data.get("conversationStrategy") === "real_estate") : data.get("bookingNameRequired") === "yes",
+          ...(data.get("bookingContactMethod") ? { bookingContactMethod: data.get("bookingContactMethod") } : {}),
+          bookingManualHandoff: data.get("bookingManualHandoff") === "on",
           defaultAppointmentDurationMinutes: Number(data.get("defaultAppointmentDurationMinutes")),
           allowedOrigins: String(data.get("allowedOrigins") ?? "")
             .split("\n")
@@ -415,7 +418,10 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
             settingsVersion: editingAssistant.settingsVersion ?? 0,
             defaultLanguage: data.get("defaultLanguage"), tone: data.get("tone"),
             greetingStyle: data.get("greetingStyle"), emojiUsage: data.get("emojiUsage"),
-            bookingNameRequired: data.get("bookingNameRequired") === "on",
+            bookingNameRequired: data.get("bookingNameRequired") === "default" ?
+            (data.get("conversationStrategy") === "real_estate") : data.get("bookingNameRequired") === "yes",
+          ...(data.get("bookingContactMethod") ? { bookingContactMethod: data.get("bookingContactMethod") } : {}),
+          bookingManualHandoff: data.get("bookingManualHandoff") === "on",
             defaultAppointmentDurationMinutes: Number(data.get("defaultAppointmentDurationMinutes")),
             allowedOrigins: String(data.get("allowedOrigins") ?? "")
               .split("\n")
@@ -714,9 +720,26 @@ function Dashboard({ me, reload }: { me: Me; reload: () => void }) {
                         {[15, 30, 45, 60, 90, 120].map((minutes) => <option key={minutes} value={minutes}>{minutes} {t("minutes")}</option>)}
                       </select>
                     </label>
-                    <label className="checkbox-label"><input type="checkbox" name="bookingNameRequired"
-                      defaultChecked={editingAssistant?.bookingNameRequired ?? false} />{t("Ask for a booking name")}</label>
-                    <small>{t("A phone number is not required for website or Telegram bookings.")}</small>
+                    <label>{t("Ask for a booking name")}
+                      <select name="bookingNameRequired" defaultValue={editingAssistant ? (editingAssistant.bookingNameRequired ? "yes" : "no") : "default"}>
+                        {!editingAssistant && <option value="default">{locale === "tr" ? "İşletme türüne göre" : "Business default"}</option>}
+                        <option value="yes">{locale === "tr" ? "Zorunlu" : "Required"}</option>
+                        <option value="no">{locale === "tr" ? "İsteğe bağlı" : "Optional"}</option>
+                      </select>
+                    </label>
+                    <label>{locale === "tr" ? "Randevu iletişim yöntemi" : "Booking contact method"}
+                      <select name="bookingContactMethod" defaultValue={editingAssistant?.bookingContactMethod ?? (editingAssistant ? "none" : "")}>
+                        {!editingAssistant && <option value="">{locale === "tr" ? "İşletme türüne göre" : "Business default"}</option>}
+                        <option value="none">{locale === "tr" ? "Zorunlu değil" : "Not required"}</option>
+                        <option value="either">{locale === "tr" ? "Telefon veya e-posta" : "Phone or email"}</option>
+                        <option value="phone">{locale === "tr" ? "Telefon" : "Phone"}</option>
+                        <option value="email">{locale === "tr" ? "E-posta" : "Email"}</option>
+                      </select>
+                    </label>
+                    <label className="checkbox-label"><input type="checkbox" name="bookingManualHandoff"
+                      defaultChecked={editingAssistant?.bookingManualHandoff ?? true} />
+                      {locale === "tr" ? "Eksik talepleri ekibe aktar" : "Offer staff handoff for incomplete requests"}
+                    </label>
                   </fieldset>
                   <button type="button" className="secondary" onClick={(event) => {
                     const field = event.currentTarget.closest("form")?.querySelector<HTMLTextAreaElement>('textarea[name="instructions"]');

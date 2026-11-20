@@ -48,7 +48,10 @@ try {
   const now = new Date();
   const year = now.getUTCFullYear() + Number(now.getUTCMonth() + 1 > month);
   const date = `${year}-${String(month).padStart(2, "0")}-${match[1].padStart(2, "0")}`;
-  const proposal = await send(`${date} saat 14:00`, /onay/i);
+  await send(`${date} saat 14:00`, /Adınız ve soyadınız/);
+  await send("Örnek Ziyaretçi", /telefon numaranızı veya e-posta adresinizi/);
+  await send("ziyaretci@example.test", /randevu onayı değildir/);
+  const proposal = await send("İletişime izin veriyorum.", /onay/i);
   assert.equal(proposal.action.status, "pending");
   await send("Olur gibi ama kesinleştirmeyelim.", /şimdilik kesinleştirmiyoruz/);
   await page.reload();
@@ -70,7 +73,8 @@ try {
     const id = document.querySelector("select option:checked").value;
     return (await fetch(`/api/organizations/${id}/receptionist/appointments`)).json();
   });
-  assert.ok(appointments.some((item) => item._id === booked.action.result.appointmentId && item.status === "booked"));
+  assert.ok(appointments.some((item) => item._id === booked.action.result.appointmentId && item.status === "booked" &&
+    item.visitorName === "Örnek Ziyaretçi" && item.contact === "ziyaretci@example.test"));
   assert.deepEqual([...external], []);
   console.log("PASS: Chromium widget, reload, explicit booking, dashboard login and appointment, zero external requests.");
 } finally {

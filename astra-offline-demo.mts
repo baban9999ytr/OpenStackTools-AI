@@ -71,7 +71,7 @@ try {
   // Keep the customer's second-listing reference predictable in this disposable demo.
   await Listing.collection.updateOne({ ...scope, _id: garden._id }, { $set: { updatedAt: new Date(Date.now() - 60_000) } });
   const assistant = await Assistant.findOneAndUpdate(scope, { $set: {
-    name: "DEMO — Nilüfer Emlak (Çevrimdışı)", conversationStrategy: "real_estate", bookingNameRequired: false,
+    name: "DEMO — Nilüfer Emlak (Çevrimdışı)", conversationStrategy: "real_estate", bookingNameRequired: true, bookingContactMethod: "either",
     modelSelection: { mode: "custom", profile: "economical", model: "gpt-6-luna", reasoningEffort: "none", processingTier: "default" },
   } }, { returnDocument: "after" }).orFail();
 
@@ -106,7 +106,8 @@ try {
       <li>İki ilanı karşılaştır, hangisini önerirsin?</li>
       <li>İkinci evin depozitosunu ve aidatını ayrı ayrı söyler misin?</li>
       <li>Eşyalı mı, hafta sonu görebilir miyim?</li>
-      <li>Sunulan tarihi ve saati yazın. Sonra “Olur gibi ama kesinleştirmeyelim.” yazıp sayfayı yenileyin.</li>
+      <li>Sunulan tarihi ve saati seçin. Sorulduğunda “Örnek Ziyaretçi” ve “ziyaretci@example.test” yazın.</li>
+      <li>“İletişime izin veriyorum.” yazın. Özeti gördükten sonra “Olur gibi ama kesinleştirmeyelim.” yazıp sayfayı yenileyin.</li>
       <li>Örnek randevuyu kaydetmek için “Evet, randevuyu onaylıyorum.” yazın.</li>
     </ol></main></body></html>`));
   app.get("/assets/:asset", (req, res, next) => {

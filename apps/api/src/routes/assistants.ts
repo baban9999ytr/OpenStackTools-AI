@@ -19,6 +19,8 @@ const input = z.strictObject({
   tone: z.enum(["warm", "formal", "friendly", "concise", "concierge"]).optional(),
   greetingStyle: z.enum(["brief", "standard"]).optional(),
   emojiUsage: z.enum(["none", "minimal"]).optional(),
+  bookingContactMethod: z.enum(["phone", "email", "either", "none"]).optional(),
+  bookingManualHandoff: z.boolean().optional(),
   bookingNameRequired: z.boolean().optional(),
   defaultAppointmentDurationMinutes: z.union([z.literal(15), z.literal(30), z.literal(45), z.literal(60), z.literal(90), z.literal(120)]).optional(),
   allowedOrigins: z.array(origin).max(10),
@@ -59,6 +61,10 @@ router.post(
     catch { res.status(422).json({ error: "Unsupported model configuration" }); return; }
     const assistant = await Assistant.create({
       ...req.body,
+      ...(req.body.conversationStrategy === "real_estate" ? {
+        bookingNameRequired: req.body.bookingNameRequired ?? true,
+        bookingContactMethod: req.body.bookingContactMethod ?? "either",
+      } : {}),
       modelSelection: selection,
       allowedOrigins: [...new Set(req.body.allowedOrigins)],
       organizationId: res.locals.organizationId,

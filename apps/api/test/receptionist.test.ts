@@ -1530,3 +1530,94 @@ test("experimental shared queue scopes Telegram intent reads, rejects unsafe adv
     env.experimentalReceptionistIntents = previous;
   }
 });
+
+test("protected viewing intake keeps contact private and requires separate consent and booking confirmation", async () => {
+  const { WidgetSession, WidgetRequest } = await import("../src/models/index.js");
+  const hours = Array.from({ length: 7 }, (_, day) => ({ day, startMinute: 840, endMinute: 930 }));
+  const owner = await Membership.findOne({ organizationId: orgA, role: "owner" }).orFail();
+  const org = await Organization.create({ name: "Synthetic booking intake", timeZone: "UTC", openingHours: hours, dailyBudgetMicros: 100_000, monthlyBudgetMicros: 100_000 });
+  await Membership.create({ organizationId: org._id, userId: owner.userId, role: "owner" });
+  await StaffAvailability.create({ organizationId: org._id, staffId: owner.userId, windows: hours, services: ["property viewing"] });
+  const key = `ost_${crypto.randomUUID()}`;
+  const assistant = await Assistant.create({ organizationId: org._id, publicKey: key, name: "Synthetic intake",
+    allowedOrigins: [websiteOrigin], instructions: "Help visitors.", conversationStrategy: "real_estate",
+    bookingNameRequired: true, bookingContactMethod: "email" });
+  const app = createApp(async () => { throw new Error("Intake must never call the model"); });
+  app.set("trust proxy", 1);
+  let ip = 210;
+  const tomorrow = new Date(Date.now() + 86_400_000);
+  tomorrow.setUTCHours(14, 0, 0, 0);
+  const open = async (minutes = 0) => {
+    const slot = new Date(tomorrow.getTime() + minutes * 60_000);
+    const clock = slot.toISOString().slice(11, 16);
+    const headers = { ...websiteHeaders, "X-Forwarded-For": `192.0.2.${ip++}` };
+    const session = await request(app).post("/api/widget/sessions").set(headers).send({ publicKey: key, locale: "tr" });
+    assert.equal(session.status, 201);
+    const identity = await WidgetSession.findOne({ tokenHash: tokenHash(session.body.token) }).orFail();
+    const conv = await Conversation.create({ organizationId: org._id, assistantId: assistant._id, visitorId: identity.visitorId,
+      workflow: { offeredSlots: [{ startAt: slot.toISOString(), staffId: owner.userId.toString(), durationMinutes: 30 }] } });
+    const auth = { ...headers, Authorization: `Bearer ${session.body.token}` };
+    const send = (text: string, clientMessageId = crypto.randomUUID()) => request(app).post("/api/widget/messages").set(auth)
+      .send({ conversationId: conv.id, clientMessageId, text });
+    assert.match((await send(clock)).body.reply.text, /Adınız ve soyadınız/);
+    return { send, auth, conv };
+  };
+  const { send, auth, conv } = await open();
+  const contact = "synthetic-booking@example.test";
+  const count = () => Appointment.countDocuments({ organizationId: org._id });
+  assert.match((await send("Evet, randevuyu onaylıyorum.")).body.reply.text, /Adınız ve soyadınız/);
+  assert.match((await send("Örnek Ziyaretçi")).body.reply.text, /e-posta adresinizi/);
+  assert.match((await send("+905550000000")).body.reply.text, /e-posta adresinizi/);
+  const messageId = crypto.randomUUID();
+  assert.match((await send(contact, messageId)).body.reply.text, /randevu onayı değildir/);
+  assert.equal((await send(contact, messageId)).status, 201);
+  assert.equal((await send("changed@example.test", messageId)).status, 409);
+  const history = await request(app).get(`/api/widget/conversations/${conv.id}/messages`).set(auth);
+  assert.equal(history.status, 200);
+  assert.doesNotMatch(JSON.stringify(history.body), /synthetic-booking@example|Örnek Ziyaretçi|bookingIntake/);
+  assert.equal(await WidgetRequest.countDocuments({ organizationId: org._id, text: contact }), 0);
+  assert.equal(await Customer.countDocuments({ organizationId: org._id }), 0);
+  assert.equal(await count(), 0);
+  const proposal = await send("İletişime izin veriyorum.");
+  assert.equal(proposal.body.action.status, "pending");
+  assert.equal(await count(), 0);
+  assert.match((await send("Kesinleştirmeyelim.")).body.reply.text, /şimdilik kesinleştirmiyoruz/);
+  const confirmed = await send("Evet, randevuyu onaylıyorum.");
+  assert.equal(confirmed.body.action.status, "completed");
+  assert.equal(await count(), 1);
+  const stored = await Appointment.findOne({ organizationId: org._id }).orFail();
+  const person = await Customer.findOne({ _id: stored.customerId, organizationId: org._id }).orFail();
+  assert.equal(person.contact, contact);
+  assert.equal(person.bookingContactMethod, "email");
+  assert.ok(person.bookingConsentAt);
+  assert.equal(person.consent?.recorded, undefined);
+  const duplicate = await request(app).post(`/api/widget/actions/${proposal.body.action.id}/confirm`).set(auth).send({});
+  assert.equal(duplicate.body.action.result.appointmentId, stored.id);
+  assert.equal(await Customer.countDocuments({ organizationId: org._id }), 1);
+  const path = `/api/organizations/${org.id}/receptionist/appointments`;
+  assert.equal((await request(app).get(path).set({ ...dashboardHeaders, Cookie: cookieB })).status, 403);
+  const dashboard = await request(app).get(path).set({ ...dashboardHeaders, Cookie: cookieA });
+  assert.equal(dashboard.body.appointments[0].contact, contact);
+
+  const declined = await open();
+  assert.match((await declined.send("Paylaşmak istemiyorum.")).body.reply.text, /randevu oluşturulmadı/);
+  assert.equal((await Conversation.findById(declined.conv.id).orFail()).status, "handoff");
+  const ready = async (minutes: number) => {
+    const visitor = await open(minutes);
+    await visitor.send("Deneme Ziyaretçi");
+    await visitor.send("second@example.test");
+    const offer = await visitor.send("İletişime izin veriyorum.");
+    assert.equal(offer.body.action.status, "pending");
+    return { ...visitor, actionId: offer.body.action.id };
+  };
+  const expired = await ready(30);
+  await Conversation.updateOne({ _id: expired.conv.id, organizationId: org._id },
+    { $set: { "bookingIntake.expiresAt": new Date(Date.now() - 1000) } });
+  assert.equal((await request(app).post(`/api/widget/actions/${expired.actionId}/confirm`).set(expired.auth).send({})).status, 403);
+
+  const takenOver = await ready(60);
+  await Conversation.updateOne({ _id: takenOver.conv.id, organizationId: org._id }, { status: "handoff" });
+  assert.equal((await request(app).post(`/api/widget/actions/${takenOver.actionId}/confirm`).set(takenOver.auth).send({})).status, 403);
+  assert.equal(await Customer.countDocuments({ organizationId: org._id }), 1);
+  assert.equal(await count(), 1);
+});

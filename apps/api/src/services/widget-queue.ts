@@ -1,3 +1,5 @@
+import { createHmac } from "node:crypto";
+import { bookingConsent, bookingContactDeclined, bookingContactRequired, bookingIntakeSchema, requiresBookingIntake, intakeContact, intakeName, type BookingIntake } from "./booking-intake.js";
 import { dispatchReceptionistIntent, scopedContactReply, standaloneContactQuestion, standalonePropertyQuestion } from "./receptionist-intent-dispatch.js";
 import { isConfirmationDeferral, isTentativeAlternativePreference, parseIntentAdvice, receptionistIntentInstructions, standaloneListingComparison } from "./receptionist-intent.js";
 import { receptionistDecisionContext, receptionistDecisionSnapshot } from "./receptionist-decision.js";
@@ -12,6 +14,7 @@ import {
   Assistant,
   Appointment,
   Conversation,
+  Customer,
   ChannelIdentity,
   InteractionToken,
   Listing,
@@ -164,6 +167,10 @@ export type ConversationIdentity = {
   locale?: "en" | "tr";
   channelConnectionId?: mongoose.Types.ObjectId;
 };
+const privateBookingText = "[Private booking intake]";
+const bookingInputDigest = (text: string) => createHmac("sha256", env.sessionSecret).update(text).digest("hex");
+const sameQueuedText = (row: { text: string; privateInputDigest?: string | null }, text: string) =>
+  row.privateInputDigest ? row.privateInputDigest === bookingInputDigest(text) : row.text === text;
 export const enqueueConversationMessage = async (
   identity: ConversationIdentity,
   input: { text: string; clientMessageId: string; conversationId?: string },
@@ -175,10 +182,10 @@ export const enqueueConversationMessage = async (
     visitorId: identity.visitorId,
     clientMessageId: input.clientMessageId,
   };
-  const existing = await WidgetRequest.findOne(key).lean();
+  const existing = await WidgetRequest.findOne(key).select("+privateInputDigest").lean();
   if (existing) {
     if (
-      existing.text !== input.text ||
+      !sameQueuedText(existing, input.text) ||
       (input.conversationId &&
         existing.conversationId.toString() !== input.conversationId)
     )
@@ -255,10 +262,10 @@ export const enqueueConversationMessage = async (
     return created;
   } catch (error) {
     if ((error as { code?: number }).code === 11000) {
-      const duplicate = await WidgetRequest.findOne(key).lean();
+      const duplicate = await WidgetRequest.findOne(key).select("+privateInputDigest").lean();
       if (
         duplicate &&
-        duplicate.text === input.text &&
+        sameQueuedText(duplicate, input.text) &&
         (!input.conversationId ||
           duplicate.conversationId.toString() === input.conversationId)
       )
@@ -319,7 +326,8 @@ const workflowMutation = (patch: WorkflowPatch) => ({
   $unset: Object.fromEntries(Object.entries(patch).filter(([, value]) => value === null).map(([key]) => [`workflow.${key}`, 1])),
 });
 const finalizeControlRequest = async (requestId: mongoose.Types.ObjectId, text: string,
-  actionId?: mongoose.Types.ObjectId, workflowPatch?: WorkflowPatch, retrieval = false) => {
+  actionId?: mongoose.Types.ObjectId, workflowPatch?: WorkflowPatch, retrieval = false,
+  intake?: { draft: BookingIntake | null; redact?: boolean }) => {
   const session = await mongoose.startSession();
   try { await session.withTransaction(async () => {
     const request = await WidgetRequest.findOne({ _id: requestId, status: "processing", reservedMicros: 0 }).session(session);
@@ -327,6 +335,8 @@ const finalizeControlRequest = async (requestId: mongoose.Types.ObjectId, text: 
     const conversation = await Conversation.findOne({ _id: request.conversationId, organizationId: request.organizationId,
       processingRequestId: requestId }).session(session);
     if (!conversation) throw new Error("Conversation lease was lost");
+    const digest = intake?.redact ? bookingInputDigest(request.text) : undefined;
+    if (digest) request.text = privateBookingText;
     const customer = await recordCustomerMessage(request, session);
     const ownHandoff = conversation.status === "handoff" && actionId && await AgentAction.exists({
       _id: actionId, organizationId: request.organizationId, conversationId: request.conversationId, name: "handoff_to_human",
@@ -335,10 +345,13 @@ const finalizeControlRequest = async (requestId: mongoose.Types.ObjectId, text: 
     const [reply] = allowReply ? await Message.create([{ organizationId: request.organizationId, conversationId: request.conversationId,
       role: "assistant", text, requestId, createdAt: replyCreatedAt(customer.createdAt), ...(retrieval ? { source: "retrieval" } : {}) }], { session }) : [];
     await WidgetRequest.updateOne({ _id: requestId, status: "processing" }, { $set: { status: allowReply ? "completed" : "handoff",
-      ...(reply ? { responseMessageId: reply._id } : {}), ...(actionId ? { actionId } : {}) },
+      ...(reply ? { responseMessageId: reply._id } : {}), ...(actionId ? { actionId } : {}),
+      ...(digest ? { text: privateBookingText, privateInputDigest: digest } : {}) },
       $unset: { leaseUntil: 1 } }, { session });
     if (workflowPatch && conversation.status === "bot") await Conversation.updateOne({ _id: request.conversationId, organizationId: request.organizationId,
       processingRequestId: requestId }, workflowMutation(workflowPatch), { session });
+    if (intake) await Conversation.updateOne({ _id: conversation._id, organizationId: request.organizationId },
+      intake.draft && allowReply && conversation.status === "bot" ? { $set: { bookingIntake: intake.draft } } : { $unset: { bookingIntake: 1 } }, { session });
     await releaseConversation(requestId, session);
   }); } finally { await session.endSession(); }
 };
@@ -545,7 +558,7 @@ export const processWidgetRequest = async (
       },
     },
     { returnDocument: "after" },
-  );
+  ).select("+bookingIntake");
   if (!conversation) return;
   const claimed = await WidgetRequest.findOneAndUpdate(
     { _id: requestId, status: "queued" },
@@ -561,6 +574,10 @@ export const processWidgetRequest = async (
   }
   if (conversation.status === "closed") {
     await finalizeFailure(requestId, "conversation_closed", false);
+    return;
+  }
+  if (conversation.status === "handoff" && conversation.bookingIntake) {
+    await finalizeControlRequest(requestId, "", undefined, undefined, false, { draft: null, redact: true });
     return;
   }
   if (conversation.status === "handoff") {
@@ -635,12 +652,80 @@ export const processWidgetRequest = async (
       return;
     }
     const experimentalIntents = assistant.conversationStrategy === "real_estate" && env.experimentalReceptionistIntents;
-    if (experimentalIntents && isConfirmationDeferral(request.text)) {
+    if ((experimentalIntents || requiresBookingIntake(assistant)) && isConfirmationDeferral(request.text)) {
       selectedAction = "confirmation_deferred";
       diagnostic();
       await finalizeControlRequest(requestId, replyLocale(request.text, request.locale ?? "en") === "tr"
         ? "Elbette, işlemi şimdilik kesinleştirmiyoruz. Hazır olduğunuzda devam edebiliriz."
         : "Of course. We can leave this unconfirmed until you're ready.");
+      return;
+    }
+    const savedIntake = bookingIntakeSchema.safeParse(conversation.bookingIntake);
+    const requiresContact = bookingContactRequired(assistant.bookingContactMethod);
+    const requiresIntake = requiresBookingIntake(assistant);
+    const intakeLocale: "tr" | "en" = request.locale === "tr" ? "tr" : "en";
+    const trIntake = intakeLocale === "tr";
+    const contactPrompt = () => {
+      const method = assistant.bookingContactMethod === "phone" ? (trIntake ? "telefon numaranızı" : "your phone number") :
+        assistant.bookingContactMethod === "email" ? (trIntake ? "e-posta adresinizi" : "your email address") :
+          (trIntake ? "telefon numaranızı veya e-posta adresinizi" : "one phone number or email address");
+      return trIntake
+        ? `Randevunuzu düzenlemek ve gerekirse değişiklikleri bildirmek için ${method} paylaşın. Bilgiyi yalnızca işletmenin yetkili ekibi bu randevu için kullanır. Pazarlama izni istenmez. Paylaşmak istemiyorsanız “Paylaşmak istemiyorum” yazın.`
+        : `Share ${method} so the authorized business team can manage this viewing and notify you of changes. This is for the booking only. To decline, say “I decline”.`;
+    };
+    const namePrompt = trIntake ? "Yetkili ekip bu bilgiyi yalnızca gösterim randevunuz için kullanır. Adınız ve soyadınız nedir? İsterseniz “Paylaşmak istemiyorum” yazabilirsiniz."
+      : "The authorized team uses this only to manage your viewing. What is your first and last name? To decline, say “I decline”.";
+    const beginIntake = async (slot: Pick<BookingIntake, "staffId" | "startAt" | "durationMinutes" | "listingId">) => {
+      const priorContact = assistant.bookingNameRequired ? await Customer.findOne({ organizationId: request.organizationId,
+        conversationId: request.conversationId, visitorId: request.visitorId, bookingConsentAt: { $exists: true } }).select("name").lean() : null;
+      const name = priorContact?.name && intakeName(`my name is ${priorContact.name}`);
+      await finalizeControlRequest(requestId, assistant.bookingNameRequired && (!name || !requiresContact) ? namePrompt : contactPrompt(),
+        undefined, undefined, false, { draft: { ...slot, ...(name && requiresContact ? { name } : {}), expiresAt: new Date(Date.now() + 15 * 60_000) } });
+    };
+    if (savedIntake.success && (!savedIntake.data.actionId || bookingContactDeclined(request.text))) {
+      const draft = savedIntake.data;
+      const context = { organizationId: request.organizationId, assistantId: request.assistantId, conversationId: request.conversationId,
+        visitorId: request.visitorId, locale: intakeLocale };
+      const finish = (reply: string, value: BookingIntake | null, actionId?: mongoose.Types.ObjectId) =>
+        finalizeControlRequest(requestId, reply, actionId, undefined, false, { draft: value, redact: true });
+      const propose = async (accepted: BookingIntake) => {
+        try {
+          const { staffId, startAt, durationMinutes, listingId } = accepted;
+          const action = await stageAction(context, { name: "create_appointment",
+            arguments: { staffId, startAt, durationMinutes, ...(listingId ? { listingId } : {}) } }, `widget:${requestId}`, accepted);
+          await finish(actionReply(action), { ...accepted, actionId: action._id.toString() }, action._id);
+        } catch (error) {
+          if (!(error instanceof AppointmentError || error instanceof ActionError)) throw error;
+          await finish(trIntake ? "Bu saat artık uygun değil. Başka bir saat seçin." : "That slot is unavailable. Please choose another.", null);
+        }
+      };
+      if (!requiresIntake || draft.expiresAt <= new Date()) {
+        await finish(trIntake ? "Bu randevu seçiminin süresi doldu. Yeni bir saat seçin." : "This viewing selection expired. Please select a new time.", null);
+      } else if (bookingContactDeclined(request.text)) {
+        const handoff = assistant.bookingManualHandoff !== false ? await stageAction(context,
+          { name: "handoff_to_human", arguments: { reason: "Visitor declined booking contact" } }, `widget:${requestId}:intake-handoff`) : undefined;
+        await finish(trIntake ? `İletişim bilgisi olmadan randevu oluşturulmadı.${handoff ? " Görüşmeyi ekibe devrettim." : ""}`
+          : `The required booking details were not shared. No appointment was made.${handoff ? " I passed the inquiry to the team." : ""}`, null, handoff?._id);
+      } else if (assistant.bookingNameRequired && !draft.name) {
+        const name = intakeName(request.text);
+        if (name && !requiresContact) await propose({ ...draft, name });
+        else await finish(name ? contactPrompt() : namePrompt, { ...draft, ...(name ? { name } : {}) });
+      } else if (!draft.contact) {
+        const contact = intakeContact(request.text, assistant.bookingContactMethod);
+        await finish(contact ? (trIntake ? "Yalnızca bu randevu için iletişime izin veriyorsanız “İletişime izin veriyorum” yazın. Bu adım randevu onayı değildir."
+          : "To permit contact about this booking only, say “I agree to booking contact”. This does not confirm the appointment.") : contactPrompt(), { ...draft, ...contact });
+      } else if (!bookingConsent(request.text)) {
+        await finish(trIntake ? "Devam etmek için “İletişime izin veriyorum” veya “Paylaşmak istemiyorum” yazın."
+          : "Say “I agree to booking contact” to continue, or “I decline”.", draft);
+      } else {
+        await propose({ ...draft, consentAt: new Date() });
+      }
+      return;
+    }
+    if (requiresContact && /[\w.%+-]+@[\w.-]+\.[a-z]{2,}|(?:\+\d[ .()-]*)?(?:\d[ .()-]*){10,15}/i.test(request.text)) {
+      await finalizeControlRequest(requestId, trIntake ? "Gizliliğiniz için iletişim bilginizi yalnızca randevu sırasında istendiğinde paylaşın."
+        : "For privacy, share contact details only when prompted during booking.", undefined, undefined, false,
+        { draft: savedIntake.success ? savedIntake.data : null, redact: true });
       return;
     }
     const confirmation = await handleTextConfirmation({ organizationId: request.organizationId,
@@ -957,6 +1042,11 @@ export const processWidgetRequest = async (
         return;
       }
       const slot = matches[0]!;
+      if (requiresIntake) {
+        await beginIntake({ staffId: slot.staffId!, startAt: slot.startAt!, durationMinutes: slot.durationMinutes!,
+          ...(workflow.selectedListingId ? { listingId: workflow.selectedListingId.toString() } : {}) });
+        return;
+      }
       if (assistant.bookingNameRequired && !knownName) {
         await finalizeControlRequest(requestId, currentLocale === "tr" ? "Randevuyu hangi isimle hazırlayayım?" : "What name should I use for the appointment?", undefined,
           { offeredSlots: null, proposedStartAt: new Date(slot.startAt!), staffId: new mongoose.Types.ObjectId(slot.staffId!),
@@ -1235,6 +1325,11 @@ export const processWidgetRequest = async (
     const eligibleViewer = availableStaff.find((person) => staffCanShowProperty(person.services ?? []));
     const stageStoredProposal = async (name?: string) => {
       if (!workflow?.proposedStartAt || !workflow.staffId || !workflow.durationMinutes) return false;
+      if (requiresIntake) {
+        await beginIntake({ staffId: workflow.staffId.toString(), startAt: workflow.proposedStartAt.toISOString(),
+          durationMinutes: workflow.durationMinutes, ...(workflow.selectedListingId ? { listingId: workflow.selectedListingId.toString() } : {}) });
+        return true;
+      }
       try {
         const action = await stageAction({ organizationId: request.organizationId, assistantId: request.assistantId,
           conversationId: request.conversationId, visitorId: request.visitorId,
@@ -1287,6 +1382,11 @@ export const processWidgetRequest = async (
         askName: assistant.bookingNameRequired && !knownName, tone: assistant.tone });
       if (!available[0]) {
         await finalizeControlRequest(requestId, reply, action._id);
+        return;
+      }
+      if (requiresIntake) {
+        await beginIntake({ staffId: eligibleViewer.id, startAt: available[0].startAt, durationMinutes: duration,
+          ...(workflow.selectedListingId ? { listingId: workflow.selectedListingId.toString() } : {}) });
         return;
       }
       const patch: WorkflowPatch = { preferredMinute: currentMinute, proposedStartAt: new Date(available[0].startAt),
@@ -1588,7 +1688,7 @@ export const processWidgetRequest = async (
         answer.text = actionReply(action, { query: schedulingQuery, repeatedNoMatch: previousNoMatch, assistantName: assistant.name, responseLength: assistant.responseLength ?? "short", tone: assistant.tone,
           previousListingIds: previousIds, broadened: Boolean(broaden),
           ...(action.name === "check_availability" && availabilityListing ? { referencedListing: { title: availabilityListing.title, location: availabilityListing.location } } : {}),
-          ...(action.name === "check_availability" && requestedClockMinute(schedulingQuery) !== undefined && assistant.bookingNameRequired && !knownName ? { askName: true } : {}) });
+          ...(action.name === "check_availability" && requestedClockMinute(schedulingQuery) !== undefined && !requiresIntake && assistant.bookingNameRequired && !knownName ? { askName: true } : {}) });
         const nearbyAlternatives = async (checked: typeof action, suffix: string) => {
           const minute = requestedClockMinute(schedulingQuery);
           const result = checked.result as { available?: unknown[]; reason?: string } | undefined;
@@ -1635,7 +1735,7 @@ export const processWidgetRequest = async (
               ...(availabilityListing ? { selectedListingId: new mongoose.Types.ObjectId(String(availabilityListing._id)) } : {}),
               ...(knownName ? { visitorName: knownName } : {}),
               preferredMinute: exact!, proposedStartAt: new Date(offered.startAt),
-              pendingQuestion: assistant.bookingNameRequired && !knownName ? "customer_name" : "slot_acceptance",
+              pendingQuestion: !requiresIntake && assistant.bookingNameRequired && !knownName ? "customer_name" : "slot_acceptance",
             };
           }
         }

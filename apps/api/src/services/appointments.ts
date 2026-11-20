@@ -127,6 +127,7 @@ export const reserveAppointment = async (input: {
   organizationId: mongoose.Types.ObjectId; staffId: mongoose.Types.ObjectId; startAt: Date;
   durationMinutes: number; visitorId?: string; conversationId?: mongoose.Types.ObjectId;
   visitorName?: string;
+  customerId?: mongoose.Types.ObjectId;
   listingId?: mongoose.Types.ObjectId;
   createdBy: "widget" | "staff";
 }, session: mongoose.ClientSession) => {

@@ -76,6 +76,8 @@ const assistantSchema = new Schema(
     tone: { type: String, enum: ["warm", "formal", "friendly", "concise", "concierge"], default: "warm" },
     greetingStyle: { type: String, enum: ["brief", "standard"], default: "brief" },
     emojiUsage: { type: String, enum: ["none", "minimal"], default: "none" },
+    bookingContactMethod: { type: String, enum: ["phone", "email", "either", "none"] },
+    bookingManualHandoff: { type: Boolean, default: true },
     bookingNameRequired: { type: Boolean, default: false },
     defaultAppointmentDurationMinutes: { type: Number, enum: [15, 30, 45, 60, 90, 120], default: 30 },
     publicKey: { type: String, required: true, unique: true },
@@ -125,6 +127,7 @@ const conversationSchema = new Schema(
       pendingQuestion: { type: String, enum: ["none", "preferred_time", "customer_name", "slot_acceptance"], default: "none" },
     },
     processingRequestId: { type: Schema.Types.ObjectId, ref: "WidgetRequest" },
+    bookingIntake: { type: Schema.Types.Mixed, select: false },
     processingLeaseUntil: { type: Date },
   },
   options,
@@ -439,6 +442,7 @@ const widgetRequestSchema = new Schema(
     channelConnectionId: { type: Schema.Types.ObjectId, ref: "ChannelConnection" },
     locale: { type: String, enum: ["en", "tr"], default: "en" },
     clientMessageId: { type: String, required: true },
+    privateInputDigest: { type: String, select: false },
     text: { type: String, required: true },
     status: {
       type: String,
@@ -514,6 +518,8 @@ const customerSchema = new Schema({
   contact: { type: String, required: true },
   request: { type: String, required: true },
   consent: { recorded: Boolean, source: String, at: Date },
+  bookingContactMethod: { type: String, enum: ["phone", "email"] },
+  bookingConsentAt: { type: Date },
   requirements: { type: String, default: "" },
   budgetMin: { type: Number, min: 0 }, budgetMax: { type: Number, min: 0 },
   preferredLocations: { type: [String], default: [] },
@@ -593,6 +599,7 @@ appointmentSlotSchema.index({ organizationId: 1, appointmentId: 1 });
 export const AppointmentSlot = mongoose.model("AppointmentSlot", appointmentSlotSchema);
 
 const agentActionSchema = new Schema({
+  bookingIntakeRequired: { type: Boolean },
   organizationId: { type: Schema.Types.ObjectId, ref: "Organization", required: true },
   assistantId: { type: Schema.Types.ObjectId, ref: "Assistant" },
   conversationId: { type: Schema.Types.ObjectId, ref: "Conversation" },

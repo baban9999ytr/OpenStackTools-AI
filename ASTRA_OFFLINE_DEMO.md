@@ -22,7 +22,7 @@ Ana sayfadaki **Sohbet demosunu aç** bağlantısı, Türkçe widget'ı açar. �
 1. Nilüfer'deki iki örnek kiralık 3+1 daireyi bulun. Karşılaştırmada 1.500 TL farkı görün.
 2. İkinci ilanın aidatını ve depozitosunu sorun. Aidat 0 TL'dir ve depozito doğrulanmamıştır.
 3. Eşya durumunu ve hafta sonu gösterimini birlikte sorun. Gösterim saatleri sentetik danışman takviminden hesaplanır.
-4. Önerilen saati seçin, onayı erteleyin ve sayfayı yenileyin. Açık onay verene kadar yeni bir randevu kaydedilmez.
+4. Önerilen saati seçin. “Örnek Ziyaretçi” ve “ziyaretci@example.test” girin. “İletişime izin veriyorum.” yazın, özeti görün, onayı erteleyin ve sayfayı yenileyin. Açık onay verene kadar yeni bir randevu kaydedilmez.
 5. **İşletme panelini aç** bağlantısından sentetik yönetici hesabıyla oturum açın. **Receptionist** bölümünde onaylanan randevuyu, **Conversations** bölümünde görüşmeyi ve hazır devir örneğini görebilirsiniz.
 
 Demo, mevcut yerel emlak verilerini kullanır. İlanlar, müşteriler, hesaplar ve randevular kurgusaldır. İki örnek istem, kaydedilmiş Luna çıktılarını çevrimdışı oynatır. Diğer desteklenen işlemler uygulamanın mevcut kurallarıyla çalışır. Bu demo canlı model kalitesini veya canlı pilot hazırlığını ölçmez. Yerel HTTP iletişimi yalnızca loopback adresinde çalışır. Bir uzaktan erişim servisi veya canlı müşteri hesabı kullanılmaz.

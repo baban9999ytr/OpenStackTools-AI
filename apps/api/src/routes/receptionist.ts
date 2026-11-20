@@ -1,7 +1,7 @@
 import { Router } from "express";
 import mongoose from "mongoose";
 import { z } from "zod";
-import { AgentAction, Appointment, Customer, Membership, Organization, StaffAvailability, User } from "../models/index.js";
+import { AgentAction, Appointment, Customer, Listing, Membership, Organization, StaffAvailability, User } from "../models/index.js";
 import { requireMembership, requireUser } from "../middleware/security.js";
 import { validate } from "../middleware/validate.js";
 import { ActionError, actionReply, confirmAction, parseAction } from "../services/agent-actions.js";
@@ -63,7 +63,21 @@ router.get("/:organizationId/receptionist/availability", requireMembership(["own
   catch (error) { if (!handle(error, res)) throw error; }
 });
 router.get("/:organizationId/receptionist/appointments", requireMembership(["owner", "admin", "agent", "viewer"]), async (_req, res) => {
-  res.json({ appointments: await Appointment.find({ organizationId: res.locals.organizationId }).sort({ startAt: 1 }).limit(100).lean() });
+  const organizationId = res.locals.organizationId;
+  const appointments = await Appointment.find({ organizationId }).sort({ startAt: 1 }).limit(100).lean();
+  const [customers, listings] = await Promise.all([
+    res.locals.role === "viewer" ? [] : Customer.find({ organizationId, _id: { $in: appointments.flatMap(item => item.customerId ? [item.customerId] : []) } })
+      .select("name contact bookingContactMethod").lean(),
+    Listing.find({ organizationId, _id: { $in: appointments.flatMap(item => item.listingId ? [item.listingId] : []) } }).select("title").lean(),
+  ]);
+  const customerById = new Map(customers.map(item => [item._id.toString(), item]));
+  const listingById = new Map(listings.map(item => [item._id.toString(), item.title]));
+  res.json({ appointments: appointments.map(({ visitorName, visitorId: _visitorId, customerId, ...item }) => {
+    const customer = customerId ? customerById.get(customerId.toString()) : undefined;
+    return { ...item, listingTitle: item.listingId ? listingById.get(item.listingId.toString()) : undefined,
+      ...(res.locals.role === "viewer" ? {} : { visitorName: customer?.name ?? visitorName,
+        contact: customer?.contact, contactMethod: customer?.bookingContactMethod }) };
+  }) });
 });
 router.get("/:organizationId/receptionist/customers", requireMembership(["owner", "admin", "agent"]), async (_req, res) => {
   res.json({ customers: await Customer.find({ organizationId: res.locals.organizationId }).sort({ updatedAt: -1 }).limit(100).lean() });

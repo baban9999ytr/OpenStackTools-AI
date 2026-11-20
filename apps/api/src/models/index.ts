@@ -127,6 +127,7 @@ const conversationSchema = new Schema(
       pendingQuestion: { type: String, enum: ["none", "preferred_time", "customer_name", "slot_acceptance"], default: "none" },
     },
     processingRequestId: { type: Schema.Types.ObjectId, ref: "WidgetRequest" },
+    bookingLocale: { type: String, enum: ["en", "tr"] },
     bookingIntake: { type: Schema.Types.Mixed, select: false },
     processingLeaseUntil: { type: Date },
   },

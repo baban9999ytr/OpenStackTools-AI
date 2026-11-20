@@ -33,12 +33,34 @@ try {
     assert.equal(res.status(), 201);
     const body = await res.json();
     assert.match(body.reply.text, expected);
+    assert.doesNotMatch(body.reply.text, /İlanları karşılaştırabilir/);
     await expect(widget.getByText(expected).last()).toBeVisible();
     return body;
   };
 
   await send("Bursa Nilüfer'de 30.000 TL altında kiralık 3+1 daire arıyorum.", /Örnek Park Dairesi.*27\.500 TL.*Örnek Bahçe Dairesi.*29\.000 TL/s);
   await send("İki ilanı karşılaştır, hangisini önerirsin?", /1\.500 TL/);
+  const fees = await send("Aslında 23 Nisan'daki ev daha çok ilgimi çekti. Onun aidatını ve depozitosunu ayrı ayrı söyler misin?",
+    /Örnek Bahçe Dairesi.*aidat: 0 TL.*depozito .*doğrulanmamış/is);
+  const both = await send("DEMO — Örnek Park Dairesi ile örnek bahçe dairesi",
+    /Örnek Park Dairesi.*Örnek Bahçe Dairesi.*karşılaştırmak/is);
+  const input = widget.getByRole("textbox", { name: "Mesajınız" });
+  async function reloadWidget() {
+    await page.reload();
+    await expect(launcher.or(input).first()).toBeVisible();
+    if (await launcher.isVisible()) await launcher.click();
+  }
+  await reloadWidget();
+  await expect(widget.getByText(both.reply.text, { exact: true })).toBeVisible();
+  const facts = await send("Peki o ev eşyalı mı? Bir de ısınma tipi ve otoparkı hakkında bilgin var mı? Emin olmadığın şeyleri tahmin etme lütfen.",
+    /Örnek Bahçe Dairesi.*eşyasız.*ısınma tipi.*doğrulanmamış.*otopark.*doğrulanmamış/is);
+  assert.equal(facts.conversationId, fees.conversationId);
+  assert.equal(facts.action, null);
+  // Exercise booking in a separate visitor session so the smoked workflows
+  // each run under the normal ten-messages-per-minute session limit.
+  await widget.getByRole("button", { name: "Bu sohbet oturumunu temizle" }).click();
+  await launcher.click();
+  await send("Bursa Nilüfer'de 30.000 TL altında kiralık 3+1 daire arıyorum.", /Örnek Park Dairesi.*Örnek Bahçe Dairesi/s);
   await send("İkinci evin depozitosunu ve aidatını ayrı ayrı söyler misin?", /0 TL.*depozito .*doğrulanmamış/s);
   const compound = await send("Eşyalı mı, hafta sonu görebilir miyim?", /eşyasız.*gösterim saatleri/is);
   const months = "Ocak Şubat Mart Nisan Mayıs Haziran Temmuz Ağustos Eylül Ekim Kasım Aralık".split(" ");
@@ -48,17 +70,15 @@ try {
   const now = new Date();
   const year = now.getUTCFullYear() + Number(now.getUTCMonth() + 1 > month);
   const date = `${year}-${String(month).padStart(2, "0")}-${match[1].padStart(2, "0")}`;
-  await send(`${date} saat 14:00`, /Adınız ve soyadınız/);
+  const paused = await send(`${date} saat 14 Olur gibi ama kesinleştirmeyelim.`, /rezerve edilmedi/);
+  assert.equal(paused.action, null);
+  await reloadWidget();
+  await expect(widget.getByText(/rezerve edilmedi/)).toBeVisible();
+  await send("Randevuya devam edelim.", /Adınız ve soyadınız/);
   await send("Örnek Ziyaretçi", /telefon numaranızı veya e-posta adresinizi/);
   await send("ziyaretci@example.test", /randevu onayı değildir/);
-  const proposal = await send("İletişime izin veriyorum.", /onay/i);
+  const proposal = await send("Bu randevu için benimle iletişime geçebilirsiniz.", /onay/i);
   assert.equal(proposal.action.status, "pending");
-  await send("Olur gibi ama kesinleştirmeyelim.", /şimdilik kesinleştirmiyoruz/);
-  await page.reload();
-  const input = widget.getByRole("textbox", { name: "Mesajınız" });
-  await expect(launcher.or(input).first()).toBeVisible();
-  if (await launcher.isVisible()) await launcher.click();
-  await expect(widget.getByText(/şimdilik kesinleştirmiyoruz/)).toBeVisible();
   const booked = await send("Evet, randevuyu onaylıyorum.", /Randevunuz oluşturuldu/);
   assert.equal(booked.action.status, "completed");
 

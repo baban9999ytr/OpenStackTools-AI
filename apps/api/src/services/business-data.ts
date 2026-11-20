@@ -27,6 +27,7 @@ export const listingInput = z.strictObject({
   publicUrl: z.url().refine((value) => value.startsWith("https://") && value.length <= 500).optional(),
 });
 export const listingFilters = z.strictObject({
+  budgetExclusive: z.boolean().optional(),
   budgetMax: z.number().finite().min(0).max(1_000_000_000).optional(),
   currency: z.enum(["TRY", "USD", "EUR", "GBP"]).optional(),
   location: short(100).optional(),
@@ -47,7 +48,7 @@ export const searchListings = async (organizationId: mongoose.Types.ObjectId, ra
   const query: Record<string, unknown> = { organizationId, archivedAt: { $exists: false }, availability: filters.availability };
   if (allStatuses) query.availability = { $in: ["available", "reserved", "sold"] };
   if (freshOnly) query.updatedAt = { $gte: new Date(Date.now() - 30 * 86_400_000) };
-  if (filters.budgetMax !== undefined) query.price = { $lte: filters.budgetMax };
+  if (filters.budgetMax !== undefined) query.price = { [filters.budgetExclusive ? "$lt" : "$lte"]: filters.budgetMax };
   if (filters.currency) query.currency = filters.currency;
   if (filters.propertyType) query.propertyType = filters.propertyType;
   if (filters.listingType) query.listingType = filters.listingType;

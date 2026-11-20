@@ -39,3 +39,39 @@ No paid model requests were made. Project review remains outstanding. Source cha
 | `node astra-offline-demo-smoke.mjs <private-login-file>` | Passed on Chromium against the actual local widget, API and MongoDB. The walkthrough collects one fictional contact and distinct consent, reloads the pending booking, confirms it and checks the name and contact on the authorized dashboard endpoint. Zero external browser requests. |
 | `npm run eval:deterministic -w apps/api` | 128 scenarios, zero failures, four intentional backend skips. |
 | `npm run typecheck`, `npm run eval:typecheck -w apps/api`, `npm run build`, `git diff --check` | Passed. |
+
+## Booking intake UX repair
+
+### Reproduced causes
+
+- **Language:** the widget request inherited the session locale. The normal reply path detected Turkish from the text, while booking intake and text confirmation read the request locale directly. An English widget session could therefore search in Turkish and ask for the visitor's name in English. The regression opens an English session with a Turkish conversation and verifies that intake, refusal, confirmation and reload remain Turkish.
+- **Repeated permission prompts:** the consent parser previously accepted only the fixed phrase in each language. A clear statement such as “Bu randevu için benimle iletişime geçebilirsiniz” could leave the intake waiting for permission. Ambiguous acknowledgments correctly left it waiting, but the old handler returned the same instruction each time. A repeated valid permission after proposal creation also lacked a dedicated response. These paths were reproduced with synthetic messages. The original customer thread was not needed to inspect private contact values.
+- **Combined deferral:** the standalone phrase detector was anchored to the whole message. A date and hour before “Olur gibi ama kesinleştirmeyelim” missed the block and could reach ordinary slot selection. The new control runs before booking intake and confirmation. It remembers one matching previously offered or verified slot and does not stage a bookable action.
+
+### Changes and dialogue
+
+The conversation now stores its established booking language and honors an explicit language switch. An older conversation can recover the language from recent customer turns if no preference is stored. During the pending workflow, neutral contact and time messages do not reset the conversation language. The consent handler recognizes bounded affirmative Turkish and English statements, keeps a separate confirmation step, and acknowledges repeated permission without creating a second proposal. Ambiguous input gets one explanation and then a concise status. A stored deferral resumes only on an explicit request and rechecks the tenant-scoped listing, current availability and expiry.
+
+| Turn | Before | After |
+| --- | --- | --- |
+| Turkish conversation in an English widget | “What is your first and last name?” could appear. | “Yetkili ekip bu bilgiyi yalnızca gösterim randevunuz için kullanır. Adınız ve soyadınız nedir?” |
+| “Bu randevu için benimle iletişime geçebilirsiniz.” | Could repeat the fixed permission phrase. | Shows the verified appointment summary and requests separate final confirmation. |
+| “21 kasım cumartesi saat 14 Olur gibi ama kesinleştirmeyelim.” | Could advance into name and contact intake. | If the offered slot matches, “Elbette, işlemi şimdilik kesinleştirmiyoruz. Saati not ettim, ancak rezerve edilmedi.” |
+| “Randevuya devam edelim.” | No dedicated continuation of this combined deferral. | Checks the slot again. Asks for the next required detail if available, or requests another time. |
+
+### Sanitized state evidence
+
+- The deferred conversation had locale `tr`, a deferred slot, no name or contact, no action ID, and no new appointment. History reload returned the Turkish deferral response. “Tamam” left the slot deferred.
+- Two ambiguous English permission turns produced `booking_contact_permission_missing` and no action. Clear permission produced `booking_contact_permission_granted` and one pending action. Repeated permission created no action. Final confirmation created one appointment.
+- The test also rejects confirmation after expiry and after takeover, verifies a repeated confirmation returns the original appointment, and checks cross-tenant denial and history redaction. Diagnostics record state labels and counts only, without private intake values.
+
+Changed `apps/api/src/models/index.ts` for the stored language, `apps/api/src/services/booking-intake.ts` for bounded permission/refusal and draft state, `apps/api/src/services/widget-queue.ts` for routing, language and resume, and `apps/api/test/receptionist.test.ts` for the MongoDB-backed regressions.
+
+Permission phrasing is intentionally bounded. Unclear wording requires clarification. Deferred memory expires after 15 minutes and guarantees no hold on the slot. Older conversations without a detectable language signal still fall back to the widget locale. No paid calls, deployment or channel integrations were performed.
+
+### UX repair test results
+
+- `npm test` passed all 191 API tests, including MongoDB-backed booking and concurrency coverage.
+- `npm run test:browser -w apps/web` passed all 20 browser tests.
+- `node astra-offline-demo-smoke.mjs <private-login-file>` passed against the real local widget, API and MongoDB. It drove combined deferral, browser reload, explicit resume, natural Turkish contact permission, final confirmation and the dashboard appointment. Chromium made zero external requests.
+- `npm run eval:deterministic -w apps/api` evaluated 128 scenarios with zero failures and four intentional backend skips. API, web and evaluation typechecks, production builds and `git diff --check` passed.

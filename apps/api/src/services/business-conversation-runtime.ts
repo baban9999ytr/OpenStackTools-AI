@@ -20,7 +20,8 @@ export async function composeBusinessTurn(context: { organizationId: Types.Objec
     ? "Telefon numaranızı paylaşmanız gerekmiyor. Buradan devam edebiliriz."
     : "You do not need to share your phone number. We can continue here." };
   const previous = businessStateSchema.safeParse(prior).data;
-  const searchChange = turn.clearLocation || turn.clearRooms || Object.keys(turn.alternatives).length > 0 || Object.entries(turn.updates).some(([field, entry]) => field !== "name" &&
+  const searchChange = Boolean(turn.updates.budget && Boolean(state.budgetExclusive) !== Boolean(previous?.budgetExclusive)) ||
+    turn.clearLocation || turn.clearRooms || Object.keys(turn.alternatives).length > 0 || Object.entries(turn.updates).some(([field, entry]) => field !== "name" &&
     previous?.values[field as keyof BusinessState["values"]]?.value !== entry?.value);
   if (turn.withdrawBudget && !searchChange && !turn.topicChange) {
     if (!previous?.values.budget || state.refused.includes("budget"))
@@ -42,7 +43,7 @@ export async function composeBusinessTurn(context: { organizationId: Types.Objec
     matches = listings.length;
     actionId = action._id;
     answer = actionReply(action, { responseLength: "short" });
-    if (listings.length) displayed = displayedListingIds(answer, listings).map((id) => new Types.ObjectId(id));
+    displayed = displayedListingIds(answer, listings).map((id) => new Types.ObjectId(id));
     // Preferences aren't facts: the schema cannot certify these attributes.
     if (state.values.furnished || state.values.balcony) answer += tr
       ? ` ${state.values.furnished?.value === false ? "Eşyasız tercihinizi" : state.values.furnished ? "Eşyalı tercihinizi" : "Balkon tercihinizi"} not aldım. Bu özellikleri kayıtlardan teyit edemiyorum.`

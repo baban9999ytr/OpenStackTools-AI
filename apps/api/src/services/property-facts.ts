@@ -10,6 +10,8 @@ const questions = [
   ["maintenanceFee", /aidat|maintenance fee|\bdues\b/i, "aidat", "maintenance fee"],
   ["deposit", /depozito|\bdeposit\b/i, "depozito", "deposit"],
   ["furnished", /(?:e[şs]yal[ıi]|mobilyalı)\s+m[ıiuü]|eşya durum|\bis it furnished\b|\bfurnish(?:ed|ing)\b.{0,15}\?/i, "eşya durumu", "furnishing status"],
+  ["heating", /ısınma|isitma|ısıtma|\bheating\b/iu, "ısınma tipi", "heating type"],
+  ["parking", /otopark|\bparking\b/iu, "otopark", "parking"],
   ["transit", /metro.{0,35}(?:kaç dakika|kaç dk|yürüme|yürüyerek|ne kadar)|(?:walk|minutes?).{0,35}(?:metro|subway)|(?:metro|subway).{0,25}(?:walk|minutes?)/i, "metroya yürüyüş süresi", "walking time to the metro"],
   ["buildingAge", /bina\s+yaşı|building age|how old.{0,25}building/i, "bina yaşı", "building age"],
   ["ownership", /tapu.{0,25}(?:kimin|sahibi|kimde)|(?:who owns|title holder|property owner|owner of (?:the|this)|landlord.s (?:name|identity|phone))/i, "tapu sahibi", "ownership information"],
@@ -37,6 +39,7 @@ export function propertyFactReply(
         : "I cannot verify the walk to the metro without knowing the listing.";
       return "";
     }
+    if (key === "heating" || key === "parking") return tr ? `${turkish} bilgisi doğrulanmamış.` : `${english} is unverified.`;
     if (key === "transit" || key === "buildingAge")
       return tr ? `${turkish} için doğrulanmış bir kayıt alanımız yok.` : `Our listing records do not verify ${english}.`;
     const value = facts?.[key];

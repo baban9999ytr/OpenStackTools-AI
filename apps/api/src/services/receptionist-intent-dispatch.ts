@@ -165,8 +165,7 @@ export async function dispatchReceptionistIntent(plan: Plan, input: Input) {
   }
   if (kinds.has("booking")) output.add(tr ? "Randevu için mevcut adımları ve açık onayınızı kullanmamız gerekiyor."
     : "Bookings use the existing steps and require your explicit confirmation.");
-  if (kinds.has("other") || (kinds.has("handoff") && !turn.handoff)) output.add(supported);
-  if (kinds.has("clarification") || !output.size) output.add(kinds.size ? clarify : intentClarification(null, text, context.locale));
+  if (![...output].some(Boolean)) output.add(kinds.size ? clarify : intentClarification(null, text, context.locale));
   return { text: [...output].filter(Boolean).join(" "), workflowPatch, actionId, retrieval: factGroups.size > 0 ||
     requestedContactFields(text).length > 0 || kinds.has("comparison") || Boolean(workflowPatch.displayedListingIds) };
 }

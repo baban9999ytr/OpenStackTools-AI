@@ -18,7 +18,7 @@ export const listingFollowUpIntent = (query: string, hasPrior: boolean): Listing
   if (/ucuz olan|pahalı olan|cheaper one|more expensive one|\b(?:it|that one|those apartments)\b|onun|o daire|daha ucuz|daha pahalı|o ilanlar|önceki ilan|back to/i.test(query)) return "reference";
   return "none";
 };
-const priceText = (listing: VerifiedListing, locale: "en" | "tr") => {
+export const priceText = (listing: VerifiedListing, locale: "en" | "tr") => {
   const amount = new Intl.NumberFormat(locale === "tr" ? "tr-TR" : "en-US", { maximumFractionDigits: 0 }).format(listing.price);
   return listing.currency === "TRY" ? locale === "tr" ? `${amount} TL` : `TRY ${amount}` : `${amount} ${listing.currency}`;
 };
@@ -81,6 +81,14 @@ export const formatListingReply = (raw: VerifiedListing[], options: ListingReply
       ? "Bu ilanların fiyatlarını aynı para biriminde doğrulayamıyorum. Konum veya özellik önceliğinizi söylerseniz seçenekleri birlikte değerlendirebiliriz."
       : "I can't verify a price comparison in one currency. Tell me whether location or property details matter most.";
     const difference = second.price - first.price;
+    if (options.responseLength === "detailed" && difference > 0) {
+      const area = (item: VerifiedListing) => typeof item.areaSqm === "number" ? `${item.areaSqm} m²`
+        : tr ? "metrekare bilgisi doğrulanmamış" : "floor area unverified";
+      const detail = (item: VerifiedListing) => `${item.title} (${item.location}, ${area(item)}) — ${priceText(item, locale)}`;
+      const gap = priceText({ ...first, price: difference }, locale);
+      return tr ? `${detail(first)}. ${detail(second)}. Fiyat önceliğinizse ${first.title} ilanını öneririm, çünkü ${gap} daha uygun.`
+        : `${detail(first)}. ${detail(second)}. If cost is your priority, I recommend ${first.title} because it is ${gap} cheaper.`;
+    }
     if (difference === 0) return tr
       ? `İki ilanın fiyatı da ${priceText(first, locale)}. Fiyata göre birini öne çıkaramam; konum veya kayıtlı özelliklerden hangisi sizin için daha önemli?`
       : `Both listings cost ${priceText(first, locale)}. Price doesn't distinguish them; which location or verified property detail matters more to you?`;

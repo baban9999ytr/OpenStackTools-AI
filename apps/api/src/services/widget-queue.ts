@@ -1,3 +1,4 @@
+import { statedListingLimit } from "./listing-money.js";
 import { createHmac } from "node:crypto";
 import { bookingConsent, bookingContactDeclined, bookingContactRequired, bookingIntakeSchema, requiresBookingIntake, intakeContact, intakeName, type BookingIntake } from "./booking-intake.js";
 import { dispatchReceptionistIntent, scopedContactReply, standaloneContactQuestion, standalonePropertyQuestion } from "./receptionist-intent-dispatch.js";
@@ -44,11 +45,11 @@ import { localAppointmentLabel, safeStaffName } from "./appointment-presentation
 import { appointmentPeriods, asksForPropertyViewing, asksForSchedulingAvailability, isAvailabilityFollowUp,
   requestedAppointmentDates, requestedAppointmentWindow, requestedClockMinute, requestedDurationMinutes,
   correctedAppointmentDate, correctedClockMinute, staffCanShowProperty } from "./appointment-language.js";
-import { displayedListingIds, formatListingReply, listingFollowUpIntent, type VerifiedListing } from "./customer-listings.js";
+import { displayedListingIds, formatListingReply, priceText, listingFollowUpIntent, type VerifiedListing } from "./customer-listings.js";
 import { combineProviderUsage, synthesisIsGrounded, verifiedFactsForSynthesis } from "./synthesis.js";
 import { handleTextConfirmation } from "./universal-confirmation.js";
 import { introducedName, isViewingRequest, nameAnswer, personalityInstructions, platformConversationRules,
-  selectedListingFromText, hasHigherListingOrdinal, shortVisitorWindow, simpleAssent, workflowResumeIntent, workflowCancelIntent } from "./conversation-flow.js";
+  selectedListingFromText, listingReference, shortVisitorWindow, simpleAssent, workflowResumeIntent, workflowCancelIntent } from "./conversation-flow.js";
 import { prohibitedOperationalRequest, safetyReply } from "./conversation-safety.js";
 import { interpretVisitorTurn, planVisitorTurn, verifiedListingInformation, validatePreferenceCandidate } from "./turn-interpretation.js";
 import { flexibleDatePlan, findFlexibleSlots, type OfferedSlot } from "./flexible-scheduling.js";
@@ -94,7 +95,7 @@ export const normalizeWidgetAction = (name: string, raw: unknown, query: string,
       && !/yeni arama|new search|start over/i.test(query);
     if (followUp && previousSearchArguments && typeof previousSearchArguments === "object") {
       const previous = previousSearchArguments as Record<string, unknown>;
-      for (const key of ["budgetMax", "currency", "listingType", "propertyType", "minRooms", "minAreaSqm", "location", "locations"])
+      for (const key of ["budgetMax", "budgetExclusive", "currency", "listingType", "propertyType", "minRooms", "minAreaSqm", "location", "locations"])
         if (args[key] === undefined && previous[key] !== undefined) args[key] = previous[key];
       if (/farklı.{0,25}mahalle|başka.{0,25}mahalle|different neighborhood|another neighborhood|elsewhere/i.test(query) && !Object.hasOwn(raw, "location")) delete args.location;
     }
@@ -107,6 +108,14 @@ export const normalizeWidgetAction = (name: string, raw: unknown, query: string,
     if (budget && /\b(?:TL|TRY)\b/i.test(query)) { args.budgetMax = Number(budget[1]?.replace(/[.,]/g, "")); args.currency = "TRY"; }
     const thousands = /\b(\d{1,3})\s*bin\s*(?:lira(?:yı|yi)?|tl)(?=\s|$|[,.!?])/i.exec(query);
     if (thousands) { args.budgetMax = Number(thousands[1]) * 1000; args.currency = "TRY"; }
+    if (budget || thousands) delete args.budgetExclusive;
+    const [limit, ...otherLimits] = statedListingLimit(query);
+    if (limit && otherLimits.every((other) => other.value === limit.value && other.currency === limit.currency)) {
+      args.budgetMax = limit.value;
+      if (limit.exclusive) args.budgetExclusive = true;
+      else delete args.budgetExclusive;
+      if (limit.currency) args.currency = limit.currency;
+    }
     const alternative = /([\p{Lu}][\p{L}]{2,39})\s+önceliğim\s+ama\s+([\p{Lu}][\p{L}]{2,39})\s+de\s+olur/iu.exec(query);
     if (alternative) {
       args.locations = [alternative[1], alternative[2]];
@@ -652,18 +661,24 @@ export const processWidgetRequest = async (
       return;
     }
     const experimentalIntents = assistant.conversationStrategy === "real_estate" && env.experimentalReceptionistIntents;
-    if ((experimentalIntents || requiresBookingIntake(assistant)) && isConfirmationDeferral(request.text)) {
-      selectedAction = "confirmation_deferred";
-      diagnostic();
-      await finalizeControlRequest(requestId, replyLocale(request.text, request.locale ?? "en") === "tr"
-        ? "Elbette, işlemi şimdilik kesinleştirmiyoruz. Hazır olduğunuzda devam edebiliriz."
-        : "Of course. We can leave this unconfirmed until you're ready.");
-      return;
-    }
     const savedIntake = bookingIntakeSchema.safeParse(conversation.bookingIntake);
     const requiresContact = bookingContactRequired(assistant.bookingContactMethod);
     const requiresIntake = requiresBookingIntake(assistant);
-    const intakeLocale: "tr" | "en" = request.locale === "tr" ? "tr" : "en";
+    const explicitLocale = /^(?:türkçe (?:devam edelim|konuşalım)|(?:please )?(?:switch to english|continue in english|speak english))[.!]?$/iu.test(request.text.trim())
+      ? (/^türkçe/iu.test(request.text.trim()) ? "tr" : "en") : undefined;
+    const languageSignal = (text: string) => replyLocale(text, "tr") === replyLocale(text, "en") ? replyLocale(text, "en") : undefined;
+    let establishedLocale = conversation.bookingLocale;
+    if (requiresIntake && !establishedLocale) {
+      const earlier = await Message.find({ organizationId: request.organizationId, conversationId: request.conversationId, role: "customer" })
+        .sort({ createdAt: -1, _id: -1 }).limit(12).select("text").lean();
+      establishedLocale = earlier.map((item) => languageSignal(item.text)).find(Boolean);
+    }
+    const intakeLocale = explicitLocale ?? establishedLocale ?? (!savedIntake.success ? languageSignal(request.text) : undefined) ?? request.locale ?? "en";
+    if (requiresIntake && conversation.bookingLocale !== intakeLocale && (explicitLocale || establishedLocale || (!savedIntake.success && languageSignal(request.text)))) {
+      await Conversation.updateOne({ _id: conversation._id, organizationId: request.organizationId, processingRequestId: requestId },
+        { $set: { bookingLocale: intakeLocale } });
+    }
+    if (requiresIntake) request.locale = intakeLocale;
     const trIntake = intakeLocale === "tr";
     const contactPrompt = () => {
       const method = assistant.bookingContactMethod === "phone" ? (trIntake ? "telefon numaranızı" : "your phone number") :
@@ -682,8 +697,86 @@ export const processWidgetRequest = async (
       await finalizeControlRequest(requestId, assistant.bookingNameRequired && (!name || !requiresContact) ? namePrompt : contactPrompt(),
         undefined, undefined, false, { draft: { ...slot, ...(name && requiresContact ? { name } : {}), expiresAt: new Date(Date.now() + 15 * 60_000) } });
     };
+    if (requiresIntake && explicitLocale) {
+      if (savedIntake.success && savedIntake.data.actionId) await AgentAction.updateOne({ _id: savedIntake.data.actionId,
+        organizationId: request.organizationId, assistantId: request.assistantId, conversationId: request.conversationId,
+        visitorId: request.visitorId, status: "pending" }, { $set: { locale: intakeLocale } });
+      await finalizeControlRequest(requestId, trIntake ? "Türkçe devam edebiliriz. Hazır olduğunuzda sıradaki bilgiyi paylaşın."
+        : "We can continue in English. Share the next detail when you are ready.");
+      return;
+    }
+    const deferSuffix = /(?:^|\s)((?:(?:olur gibi|olabilir|evet|tamam)[, ]+(?:ama|fakat)\s+)?(?:şimdilik\s+)?(?:randevuyu\s+)?(?:kesinleştirmeyelim|onaylamayalım)[.!?]?)$/u.exec(request.text.trim().toLocaleLowerCase("tr"));
+    const slotPrefix = deferSuffix?.index ? request.text.trim().slice(0, deferSuffix.index).trim() : "";
+    if ((experimentalIntents || requiresIntake) && (isConfirmationDeferral(request.text) || (requiresIntake && deferSuffix))) {
+      selectedAction = "confirmation_deferred";
+      let deferred: BookingIntake | undefined;
+      if (slotPrefix && !savedIntake.success) {
+        const org = await Organization.findById(request.organizationId).select("timeZone").lean();
+        const zone = org?.timeZone ?? "UTC";
+        const minute = requestedClockMinute(slotPrefix);
+        const dates = requestedAppointmentDates(slotPrefix, zone, request.createdAt);
+        const workflow = conversation.workflow;
+        const options = (workflow?.offeredSlots ?? []).map(({ startAt, staffId, durationMinutes }) => ({ startAt, staffId, durationMinutes }));
+        if (workflow?.proposedStartAt && workflow.staffId && workflow.durationMinutes &&
+            !options.some(slot => slot.startAt === workflow.proposedStartAt?.toISOString() && slot.staffId === workflow.staffId?.toString())) {
+          options.push({ startAt: workflow.proposedStartAt.toISOString(), staffId: workflow.staffId.toString(), durationMinutes: workflow.durationMinutes });
+        }
+        const matches = options.filter(slot => {
+          if (!slot.startAt || !slot.staffId || !slot.durationMinutes || Date.parse(slot.startAt) <= Date.now()) return false;
+          const local = localParts(new Date(slot.startAt), zone);
+          return local.minute === minute && (dates.length ? dates.includes(local.date) : !/\d{1,2}\s+\p{L}+.*saat/iu.test(slotPrefix));
+        });
+        const slot = matches?.length === 1 ? matches[0] : undefined;
+        if (slot?.startAt && slot.staffId && slot.durationMinutes) deferred = { staffId: slot.staffId, startAt: slot.startAt,
+          durationMinutes: slot.durationMinutes,
+          ...(conversation.workflow?.selectedListingId ? { listingId: conversation.workflow.selectedListingId.toString() } : {}),
+          deferred: true, expiresAt: new Date(Date.now() + 15 * 60_000) };
+      }
+      diagnostic();
+      await finalizeControlRequest(requestId, trIntake
+        ? `Elbette, işlemi şimdilik kesinleştirmiyoruz.${deferred ? " Saati not ettim, ancak rezerve edilmedi. Hazır olduğunuzda “Randevuya devam edelim” yazın." : " Hazır olduğunuzda devam edebiliriz."}`
+        : "Of course. We can leave this unconfirmed until you're ready.", undefined, undefined, false, deferred ? { draft: deferred } : savedIntake.success ? { draft: savedIntake.data, redact: true } : undefined);
+      return;
+    }
+    if (savedIntake.success && savedIntake.data.deferred && !bookingContactDeclined(request.text)) {
+      const draft = savedIntake.data;
+      if (workflowResumeIntent(request.text)) {
+        const org = await Organization.findById(request.organizationId).select("timeZone").lean();
+        const start = new Date(draft.startAt);
+        const local = localParts(start, org?.timeZone ?? "UTC");
+        const listingValid = !draft.listingId || await Listing.exists({ _id: draft.listingId, organizationId: request.organizationId,
+          archivedAt: { $exists: false }, availability: "available", updatedAt: { $gte: new Date(Date.now() - 30 * 86_400_000) } });
+        if (requiresIntake && listingValid && draft.expiresAt > new Date()) {
+          const availability = await inspectAvailability(request.organizationId, new mongoose.Types.ObjectId(draft.staffId), local.date,
+            draft.durationMinutes, { startMinute: local.minute, endMinute: local.minute + draft.durationMinutes }, new Date());
+          if (availability.available.some(slot => slot.startAt === draft.startAt)) {
+            const { staffId, startAt, durationMinutes, listingId } = draft;
+            await beginIntake({ staffId, startAt, durationMinutes, ...(listingId ? { listingId } : {}) });
+            return;
+          }
+        }
+        await finalizeControlRequest(requestId, trIntake ? "Bu saati artık doğrulayamıyorum. Lütfen yeni bir saat seçin."
+          : "That time is no longer available. Please choose another slot.", undefined, undefined, false, { draft: null });
+      } else {
+        await finalizeControlRequest(requestId, trIntake ? "Saat rezerve edilmedi. Devam etmek isterseniz “Randevuya devam edelim” yazın."
+          : "The time is not reserved. Say “continue booking” when ready.", undefined, undefined, false, { draft, redact: true });
+      }
+      return;
+    }
+    if (savedIntake.success && savedIntake.data.actionId && bookingConsent(request.text)) {
+      selectedAction = "booking_contact_permission_already_recorded";
+      diagnostic();
+      await finalizeControlRequest(requestId, trIntake ? "İletişim izniniz alındı. Özet için önceki mesaja bakın. Randevu için ayrıca açık onayınız gerekiyor."
+        : "Your contact permission is already recorded. See the previous summary. The appointment still needs your explicit confirmation.",
+      undefined, undefined, false, { draft: savedIntake.data, redact: true });
+      return;
+    }
     if (savedIntake.success && (!savedIntake.data.actionId || bookingContactDeclined(request.text))) {
       const draft = savedIntake.data;
+      selectedAction = bookingContactDeclined(request.text) ? "booking_intake_declined" :
+        assistant.bookingNameRequired && !draft.name ? "booking_intake_name" : !draft.contact ? "booking_intake_contact" :
+        bookingConsent(request.text) ? "booking_contact_permission_granted" : "booking_contact_permission_missing";
+      diagnostic();
       const context = { organizationId: request.organizationId, assistantId: request.assistantId, conversationId: request.conversationId,
         visitorId: request.visitorId, locale: intakeLocale };
       const finish = (reply: string, value: BookingIntake | null, actionId?: mongoose.Types.ObjectId) =>
@@ -715,8 +808,11 @@ export const processWidgetRequest = async (
         await finish(contact ? (trIntake ? "Yalnızca bu randevu için iletişime izin veriyorsanız “İletişime izin veriyorum” yazın. Bu adım randevu onayı değildir."
           : "To permit contact about this booking only, say “I agree to booking contact”. This does not confirm the appointment.") : contactPrompt(), { ...draft, ...contact });
       } else if (!bookingConsent(request.text)) {
-        await finish(trIntake ? "Devam etmek için “İletişime izin veriyorum” veya “Paylaşmak istemiyorum” yazın."
-          : "Say “I agree to booking contact” to continue, or “I decline”.", draft);
+        const guidance = draft.consentExplained
+          ? (trIntake ? "İletişim izniniz henüz alınmadı. Randevu beklemede." : "Contact permission is still missing. No appointment has been booked.")
+          : (trIntake ? "“Tamam” tek başına iletişim izni sayılmaz. Örneğin “Bu randevu için benimle iletişime geçebilirsiniz” yazabilir veya paylaşmayı reddedebilirsiniz."
+            : "An acknowledgment alone does not give contact permission. Say “You may contact me about this viewing” or decline.");
+        await finish(guidance, { ...draft, consentExplained: true });
       } else {
         await propose({ ...draft, consentAt: new Date() });
       }
@@ -730,7 +826,7 @@ export const processWidgetRequest = async (
     }
     const confirmation = await handleTextConfirmation({ organizationId: request.organizationId,
       assistantId: request.assistantId, conversationId: request.conversationId,
-      visitorId: request.visitorId, locale: request.locale }, request.text,
+      visitorId: request.visitorId, locale: requiresIntake ? intakeLocale : request.locale }, request.text,
     request.channel === "telegram" ? "telegram" : "web", `text:${request._id.toString()}`);
     if (confirmation) {
       selectedAction = confirmation.actionId ? "confirm_pending_action" : "clarify_confirmation";
@@ -797,12 +893,12 @@ export const processWidgetRequest = async (
     priorListingCount = previousListings.length;
     const workflowListing = byId.get(String(workflow?.selectedListingId));
     const propertyFocus = byId.get(String(workflow?.propertyFocusId));
-    const explicitSelector = /[iİ]lkini|[iİ]kincisini|(?:[iİ]lk|birinci|[iİ]kinci)\s+(?:ilan|daire|ev(?:in|i|de|den)?\b)|ucuz olan|cheaper one|\b(?:first|second|1st|2nd|cheapest)\b/i.test(request.text) || hasHigherListingOrdinal(request.text);
     const otherListing = /\bdiğeri\p{L}*|\b(?:the other one|the other listing)\b/iu.test(request.text);
     const focusId = workflow?.propertyFocusId ?? workflow?.selectedListingId;
     const focus = workflow?.propertyFocusId ? propertyFocus : workflowListing;
-    const referencedStoredListing = selectedListingFromText(request.text,
-      storedPreviousListings.map((item) => byId.get(String(item._id)) ?? item));
+    const listingReferences = storedPreviousListings.map((item) => byId.get(String(item._id)) ?? { ...item, price: Number.NaN });
+    const reference = listingReference(request.text, listingReferences);
+    const { resolved: referencedStoredListing, explicit: explicitSelector } = reference;
     const propertyListing = referencedStoredListing ? byId.get(String(referencedStoredListing._id))
       : explicitSelector ? undefined
         : otherListing ? storedIds.length === 2 && focus && storedIds.includes(String(focus._id))
@@ -812,9 +908,78 @@ export const processWidgetRequest = async (
     const requestedFacts = requestedPropertyFacts(request.text);
     const selectedListing = referencedStoredListing ? byId.get(String(referencedStoredListing._id))
       : explicitSelector ? undefined : weekendViewing ? propertyListing : workflowListing;
+    const currentLocale = requiresIntake ? intakeLocale : replyLocale(request.text, request.locale ?? "en");
+    const businessTurn = extractBusinessTurn(request.text, requestId.toString(), workflow?.business);
+    const explicitViewing = weekendViewing || isViewingRequest(request.text) || asksForPropertyViewing(request.text);
+    const explicitSearch = /arıyorum|ariyorum|ilan.{0,18}(?:bul|listele)|looking for|find.{0,30}(?:listings|apartments)|search for/i.test(request.text);
+    const tr = currentLocale === "tr";
+    const staleListingReply = tr ? "Seçtiğiniz ilanın güncel durumunu doğrulayamıyorum. Başka bir ilana bakalım mı?"
+      : "I cannot verify the current status of that listing. Would you like another option?";
+    const askWhichListing = tr ? "Hangi ilanın bilgilerini istersiniz?" : "Which listing would you like details about?";
+    const namedMatches = reference.matches.flatMap((item) => {
+      const live = byId.get(String(item._id));
+      return live ? [live] : [];
+    });
+    const readOnlyListingTurn = assistant.conversationStrategy === "real_estate" && !businessTurn.injection &&
+      !businessTurn.handoff && !explicitSearch && !explicitViewing && !asksForSchedulingAvailability(request.text) &&
+      !workflowCancelIntent(request.text) && !requestedContactFields(request.text).length;
+    const asksForFacts = requestedFacts.length && /\?|söyler|bilgin|nedir|ne kadar|hakkında bilgi|tell me|what|how much/i.test(request.text);
+    const contextualProperty = /(?:^|\s)(?:o (?:ev|daire|ilan)\p{L}*|that (?:home|apartment|listing))(?=\s|[,.!?]|$)/iu.test(request.text);
+    if (readOnlyListingTurn && asksForFacts &&
+        (reference.named || reference.priced || contextualProperty || requestedFacts.some(([key]) => key === "heating" || key === "parking"))) {
+      selectedAction = "property_facts";
+      diagnostic();
+      await finalizeControlRequest(requestId, propertyListing
+        ? propertyFactReply(reference.priced ? { ...propertyListing, title: `${propertyListing.title} (${priceText(propertyListing, currentLocale)})` }
+          : propertyListing, requestedFacts, currentLocale)
+        : referencedStoredListing ? staleListingReply : askWhichListing, undefined,
+        propertyListing ? { propertyFocusId: propertyListing._id } : undefined, true);
+      return;
+    }
+    // Reuse the durable displayed set for a price-and-details recommendation.
+    // This read does not run a new search or change the visitor's focus.
+    const comparisonText = request.text.toLocaleLowerCase("tr");
+    const pairRecommendation = /(?:iki|2)\s+(?:seçenek|ilan)|(?:two|2) (?:options|listings)/u.test(comparisonText) &&
+      /hangisini.{0,40}(?:öner|tavsiye)|(?:which|why).{0,35}recommend/u.test(comparisonText) &&
+      /neden|sadece fiyat|why|price alone/u.test(comparisonText);
+    if (readOnlyListingTurn && pairRecommendation) {
+      const [first, second] = previousListings;
+      const reply = previousListings.length === 2 && first && second &&
+        first.currency === second.currency && first.listingType && first.listingType === second.listingType
+        ? formatListingReply(previousListings, { locale: currentLocale, query: "compare", reused: true, responseLength: "detailed" })
+        : tr ? "Karşılaştırmak için hangi iki ilanı seçmek istersiniz?" : "Which two listings would you like to compare?";
+      await finalizeControlRequest(requestId, reply, undefined, undefined, true);
+      return;
+    }
+    const namedComparison = reference.named && listingFollowUpIntent(request.text, true) === "recommend" && !requestedFacts.length;
+    const focusRequested = reference.named && !asksForFacts &&
+      /(?:ilgimi çekti|onu inceleyelim|i[’']?m more interested in|let[’']s focus on)/iu.test(request.text);
+    if (readOnlyListingTurn && (reference.mentionOnly || namedComparison || focusRequested)) {
+      if (namedMatches.length !== reference.matches.length) {
+        await finalizeControlRequest(requestId, staleListingReply);
+      } else if (namedComparison && namedMatches.length === 2) {
+        const [first, second] = namedMatches;
+        const comparable = first!.currency === second!.currency && first!.listingType && first!.listingType === second!.listingType;
+        await finalizeControlRequest(requestId, comparable
+          ? formatListingReply(namedMatches, { locale: currentLocale, query: "compare", reused: true })
+          : tr ? "Bu iki ilanın fiyatlarını aynı para birimi ve işlem türünde karşılaştıramıyorum."
+            : "I cannot compare the prices of these two listings in the same currency and transaction type.",
+        undefined, undefined, true);
+      } else if (!namedComparison && propertyListing) {
+        await finalizeControlRequest(requestId, tr ? `${propertyListing.title} için hangi bilgiyi istersiniz?`
+          : `What would you like to know about ${propertyListing.title}?`, undefined, { propertyFocusId: propertyListing._id }, true);
+      } else {
+        const names = namedMatches.map((item) => item.title).join(tr ? " ve " : " and ");
+        const previous = focus && namedMatches.some((item) => item._id.equals(focus._id))
+          ? tr ? ` Son konuştuğumuz ilan ${focus.title}.` : ` The last listing we discussed was ${focus.title}.` : "";
+        await finalizeControlRequest(requestId, tr
+          ? `${names} ilanlarından söz ettiniz.${previous} Bunları karşılaştırmak mı, yoksa birinin ayrıntılarını öğrenmek mi istersiniz?`
+          : `You mentioned ${names}.${previous} Would you like to compare them or ask about one of them?`, undefined, undefined, true);
+      }
+      return;
+    }
     if (assistant.conversationStrategy === "real_estate" && referencedStoredListing && !selectedListing) {
-      await finalizeControlRequest(requestId, request.locale === "tr" ? "Seçtiğiniz ilanın güncel durumunu doğrulayamıyorum. Başka bir ilana bakalım mı?"
-        : "I cannot verify the current status of that listing. Would you like another option?");
+      await finalizeControlRequest(requestId, staleListingReply);
       return;
     }
     const correctedDate = correctedAppointmentDate(request.text, organization?.timeZone ?? "UTC", new Date(request.createdAt));
@@ -841,8 +1006,6 @@ export const processWidgetRequest = async (
       }
     }
     const configuredDuration = assistant.defaultAppointmentDurationMinutes ?? 30;
-    const currentLocale = replyLocale(request.text, request.locale ?? "en");
-    const businessTurn = extractBusinessTurn(request.text, requestId.toString(), workflow?.business);
     if (experimentalIntents && isTentativeAlternativePreference(request.text) &&
         businessTurn.alternatives.location && businessTurn.alternatives.rooms && !businessTurn.conflicts.length) {
       selectedAction = "update_preferences_only";
@@ -853,10 +1016,8 @@ export const processWidgetRequest = async (
       return;
     }
     const requestedContact = requestedContactFields(request.text);
-    const explicitViewing = weekendViewing || isViewingRequest(request.text) || asksForPropertyViewing(request.text);
     const mixedContact = experimentalIntents && requestedContact.length > 0 &&
       (explicitViewing || requestedFacts.length > 0 || Object.keys(businessTurn.alternatives).length > 0);
-    const explicitSearch = /arıyorum|ariyorum|ilan.{0,18}(?:bul|listele)|looking for|find.{0,30}(?:listings|apartments)|search for/i.test(request.text);
     // A new intake with open budget and both sets of alternatives can use the existing
     // interpretation call. The same evidence rules apply to both parser and model.
     const assistedIntake = assistant.conversationStrategy === "real_estate" &&
@@ -1396,20 +1557,11 @@ export const processWidgetRequest = async (
       await finalizeControlRequest(requestId, reply, action._id, patch);
       return;
     }
-    const referenceQueries = [schedulingQuery, ...history.slice(0, -1).reverse()
-      .filter((turn) => turn.role === "customer").slice(0, 3).map((turn) => turn.text)];
-    const referencedListing = referenceQueries.map((query) => {
-      const lower = query.toLocaleLowerCase("tr");
-      const byTitle = previousListings.filter((item) => {
-        const title = item.title.replace(/^DEMO\s*[—-]\s*/i, "");
-        return title.length >= 8 && lower.includes(title.toLocaleLowerCase("tr"));
-      });
-      if (byTitle.length === 1) return byTitle;
-      return previousListings.filter((item) => {
-        const neighborhood = item.location.split(",").map((part) => part.trim()).filter(Boolean).at(-1) ?? "";
-        return neighborhood.length >= 3 && lower.includes(neighborhood.toLocaleLowerCase("tr"));
-      });
-    }).find((matches) => matches.length === 1)?.[0];
+    const timeReference = permissionToCheck ? listingReference(schedulingQuery, listingReferences) : reference;
+    const previousReference = !timeReference.explicit && !explicitSelector
+      ? history.slice(0, -1).reverse().filter((turn) => turn.role === "customer").slice(0, 3)
+        .map((turn) => listingReference(turn.text, listingReferences).resolved).find(Boolean) : undefined;
+    const referencedListing = byId.get(String((timeReference.resolved ?? previousReference)?._id));
     const previousIds = previousListings.map((item) => String(item._id ?? "")).filter((id) => /^[a-f\d]{24}$/i.test(id));
     followUpIntent = listingFollowUpIntent(request.text, storedIds.length > 0);
     const realEstateDecision = assistant.conversationStrategy === "real_estate";

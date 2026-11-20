@@ -883,7 +883,7 @@ test("follow-up and self-introduction stay contextual without inventing business
 
 test("invalid model tool arguments return a localized validation reply without fake retrieval", async () => {
   const responder = createApp(async () => ({ text: "Made-up property", inputTokens: 8, outputTokens: 4,
-    action: { name: "search_listings", arguments: { budgetMax: 30000 } } }));
+    action: { name: "search_listings", arguments: { budgetMax: 30000, unsupportedFilter: true } } }));
   const session = await request(responder).post("/api/widget/sessions").set(websiteHeaders).send({ publicKey, locale: "tr" });
   assert.equal(session.status, 201);
   const sent = await request(responder).post("/api/widget/messages").set(websiteHeaders)
@@ -1547,11 +1547,11 @@ test("protected viewing intake keeps contact private and requires separate conse
   let ip = 210;
   const tomorrow = new Date(Date.now() + 86_400_000);
   tomorrow.setUTCHours(14, 0, 0, 0);
-  const open = async (minutes = 0) => {
-    const slot = new Date(tomorrow.getTime() + minutes * 60_000);
+  const open = async (minutes = 0, mode: "turkish" | "english" | "defer" = "turkish") => {
+    const slot = new Date(tomorrow.getTime() + minutes * 60_000 + (mode === "defer" ? 86_400_000 : 0));
     const clock = slot.toISOString().slice(11, 16);
     const headers = { ...websiteHeaders, "X-Forwarded-For": `192.0.2.${ip++}` };
-    const session = await request(app).post("/api/widget/sessions").set(headers).send({ publicKey: key, locale: "tr" });
+    const session = await request(app).post("/api/widget/sessions").set(headers).send({ publicKey: key, locale: "en" });
     assert.equal(session.status, 201);
     const identity = await WidgetSession.findOne({ tokenHash: tokenHash(session.body.token) }).orFail();
     const conv = await Conversation.create({ organizationId: org._id, assistantId: assistant._id, visitorId: identity.visitorId,
@@ -1559,7 +1559,16 @@ test("protected viewing intake keeps contact private and requires separate conse
     const auth = { ...headers, Authorization: `Bearer ${session.body.token}` };
     const send = (text: string, clientMessageId = crypto.randomUUID()) => request(app).post("/api/widget/messages").set(auth)
       .send({ conversationId: conv.id, clientMessageId, text });
-    assert.match((await send(clock)).body.reply.text, /Adınız ve soyadınız/);
+    if (mode !== "english") await Message.create({ organizationId: org._id, conversationId: conv._id,
+      role: "customer", text: "Merhaba, bu daireyi görmek istiyorum." });
+    if (mode === "defer") {
+      const month = new Intl.DateTimeFormat("tr-TR", { month: "long", timeZone: "UTC" }).format(slot);
+      const weekday = new Intl.DateTimeFormat("tr-TR", { weekday: "long", timeZone: "UTC" }).format(slot);
+      const postponed = await send(`${slot.getUTCDate()} ${month} ${weekday} saat ${clock.slice(0, 2)} Olur gibi ama kesinleştirmeyelim.`);
+      assert.match(postponed.body.reply.text, /rezerve edilmedi/);
+      assert.doesNotMatch(postponed.body.reply.text, /Adınız|e-posta/);
+      assert.equal(postponed.body.action, null);
+    } else assert.match((await send(clock)).body.reply.text, mode === "english" ? /first and last name/ : /Adınız ve soyadınız/);
     return { send, auth, conv };
   };
   const { send, auth, conv } = await open();
@@ -1578,7 +1587,7 @@ test("protected viewing intake keeps contact private and requires separate conse
   assert.equal(await WidgetRequest.countDocuments({ organizationId: org._id, text: contact }), 0);
   assert.equal(await Customer.countDocuments({ organizationId: org._id }), 0);
   assert.equal(await count(), 0);
-  const proposal = await send("İletişime izin veriyorum.");
+  const proposal = await send("Bu randevu için benimle iletişime geçebilirsiniz.");
   assert.equal(proposal.body.action.status, "pending");
   assert.equal(await count(), 0);
   assert.match((await send("Kesinleştirmeyelim.")).body.reply.text, /şimdilik kesinleştirmiyoruz/);
@@ -1600,7 +1609,7 @@ test("protected viewing intake keeps contact private and requires separate conse
   assert.equal(dashboard.body.appointments[0].contact, contact);
 
   const declined = await open();
-  assert.match((await declined.send("Paylaşmak istemiyorum.")).body.reply.text, /randevu oluşturulmadı/);
+  assert.match((await declined.send("İletişim bilgilerimi paylaşmak istemiyorum.")).body.reply.text, /randevu oluşturulmadı/);
   assert.equal((await Conversation.findById(declined.conv.id).orFail()).status, "handoff");
   const ready = async (minutes: number) => {
     const visitor = await open(minutes);
@@ -1619,5 +1628,214 @@ test("protected viewing intake keeps contact private and requires separate conse
   await Conversation.updateOne({ _id: takenOver.conv.id, organizationId: org._id }, { status: "handoff" });
   assert.equal((await request(app).post(`/api/widget/actions/${takenOver.actionId}/confirm`).set(takenOver.auth).send({})).status, 403);
   assert.equal(await Customer.countDocuments({ organizationId: org._id }), 1);
+  const deferred = await open(0, "defer");
+  const paused = await Conversation.findById(deferred.conv.id).select("+bookingIntake").orFail().lean();
+  assert.equal(paused.bookingLocale, "tr");
+  assert.equal(paused.bookingIntake.deferred, true);
+  assert.equal(paused.bookingIntake.name, undefined);
+  assert.equal(paused.bookingIntake.contact, undefined);
+  assert.equal(paused.bookingIntake.actionId, undefined);
+  const deferredHistory = await request(app).get(`/api/widget/conversations/${deferred.conv.id}/messages`).set(deferred.auth);
+  assert.match(deferredHistory.body.messages.at(-1).text, /rezerve edilmedi/);
+  assert.match((await deferred.send("Tamam")).body.reply.text, /rezerve edilmedi/);
   assert.equal(await count(), 1);
+  assert.match((await deferred.send("Randevuya devam edelim.")).body.reply.text, /Adınız ve soyadınız/);
+
+  assert.match((await deferred.send("Switch to English.")).body.reply.text, /continue in English/);
+  assert.match((await deferred.send("Demo Visitor")).body.reply.text, /email address/);
+
+  const english = await open(30, "english");
+  assert.match((await english.send("Demo Visitor")).body.reply.text, /email address/);
+  assert.match((await english.send("offline@example.test")).body.reply.text, /does not confirm/);
+  const unclear = await english.send("Okay");
+  assert.match(unclear.body.reply.text, /acknowledgment alone/);
+  assert.equal(unclear.body.action, null);
+  assert.match((await english.send("Okay")).body.reply.text, /permission is still missing/);
+  const accepted = await english.send("You may contact me about this viewing.");
+  assert.equal(accepted.body.action.status, "pending");
+  const repeated = await english.send("I agree to booking contact.");
+  assert.equal(repeated.body.action, null);
+  assert.match(repeated.body.reply.text, /already recorded/);
+  const englishBooked = await english.send("Yes, confirm the appointment.");
+  assert.equal(englishBooked.body.action.status, "completed");
+  assert.match(englishBooked.body.reply.text, /appointment.*booked/i);
+  assert.equal(await count(), 2);
+});
+
+test("long Turkish widget conversation keeps verified display order and property focus across reload", async () => {
+  const { env } = await import("../src/config/env.js");
+  const org = await Organization.create({ name: "Synthetic long conversation", timeZone: "Europe/Istanbul",
+    dailyBudgetMicros: 1_000_000, monthlyBudgetMicros: 1_000_000 });
+  const [, garden] = await Listing.create(demoListings.slice(0, 2).map(({ stale: _stale, ...listing }, index) => ({
+    ...listing, organizationId: org._id, facts: index ? { maintenanceFee: 0, furnished: false } : {},
+    ...(index ? { description: "Sentetik açıklama: depozito, kombi ve kapalı otopark." } : {}),
+  })));
+  await Listing.collection.updateOne({ _id: garden!._id }, { $set: { updatedAt: new Date(Date.now() - 60_000) } });
+  const foreign = await Organization.create({ name: "Synthetic foreign listing owner",
+    dailyBudgetMicros: 1_000_000, monthlyBudgetMicros: 1_000_000 });
+  await Listing.create({ ...demoListings[1], organizationId: foreign._id, price: 14_000,
+    facts: { maintenanceFee: 999, deposit: 98765, furnished: true } });
+  const publicKey = `ost_${crypto.randomUUID()}`;
+  await Assistant.create({ publicKey, name: "Synthetic conversation assistant", instructions: "Synthetic.",
+    organizationId: org._id, allowedOrigins: [websiteOrigin], conversationStrategy: "real_estate",
+    bookingNameRequired: true, bookingContactMethod: "either" });
+
+  let modelCalls = 0;
+  const respond: import("../src/services/ai.js").AIResponder = async () => {
+    modelCalls++;
+    return { text: "Synthetic fallback", inputTokens: 0, outputTokens: 0 };
+  };
+  respond.interpretIntent = async (_instructions, history) => {
+    modelCalls++;
+    return { text: JSON.stringify({ intents: [{ kind: "other", mode: "unclear",
+      evidence: history.at(-1)?.text.slice(0, 160), reference: { kind: "none", position: null },
+      attributes: [], locations: [], rooms: [], furnishing: null, uncertainty: [] }] }), inputTokens: 0, outputTokens: 0 };
+  };
+  const previous = env.experimentalReceptionistIntents;
+  env.experimentalReceptionistIntents = true;
+  try {
+    const adapter = createApp(respond);
+    adapter.set("trust proxy", 1);
+    const headers = { ...websiteHeaders, "X-Forwarded-For": "192.0.2.223" };
+    const session = await request(adapter).post("/api/widget/sessions").set(headers).send({ publicKey, locale: "tr" });
+    assert.equal(session.status, 201);
+    let auth = { ...headers, Authorization: `Bearer ${session.body.token}` };
+    let conversationId: string | undefined;
+    const send = async (text: string) => {
+      const result = await request(adapter).post("/api/widget/messages").set(auth)
+        .send({ text, conversationId, clientMessageId: crypto.randomUUID() });
+      assert.equal(result.status, 201, JSON.stringify(result.body));
+      conversationId = result.body.conversationId;
+      assert.doesNotMatch(result.body.reply.text, /İlanları karşılaştırabilir|Synthetic fallback/);
+      return result.body.reply.text as string;
+    };
+    const search = "Bursa Nilüfer'de 30.000 TL altında kiralık 3+1 daire arıyorum.";
+    assert.match(await send(search), /Örnek Park Dairesi.*27\.500 TL.*Örnek Bahçe Dairesi.*29\.000 TL/s);
+    assert.match(await send("İki ilanı karşılaştır, hangisini önerirsin?"), /1\.500 TL/);
+    const state = () => Conversation.findById(conversationId).lean().then((row) => row!.workflow!);
+    assert.equal((await state()).propertyFocusId ?? null, null);
+    const fees = await send("Aslında 23 Nisan'daki ev daha çok ilgimi çekti. Onun aidatını ve depozitosunu ayrı ayrı söyler misin?");
+    assert.match(fees, /Örnek Bahçe Dairesi.*aidat: 0 TL.*depozito.*doğrulanmamış/is);
+    assert.doesNotMatch(fees, /999|98\.765|Örnek Park Dairesi/);
+    assert.equal(String((await state()).propertyFocusId), String(garden!._id));
+    const both = await send("DEMO — Örnek Park Dairesi ile örnek bahçe dairesi");
+    assert.match(both, /Örnek Park Dairesi.*Örnek Bahçe Dairesi.*karşılaştırmak/is);
+    assert.equal(String((await state()).propertyFocusId), String(garden!._id));
+
+    const history = await request(adapter).get(`/api/widget/conversations/${conversationId}/messages`).set(auth);
+    assert.equal(history.status, 200);
+    assert.equal(history.body.messages.at(-1).text, both);
+    const question = "Peki o ev eşyalı mı? Bir de ısınma tipi ve otoparkı hakkında bilgin var mı? Emin olmadığın şeyleri tahmin etme lütfen.";
+    const facts = await send(question);
+    assert.match(facts, /Örnek Bahçe Dairesi.*eşyasız.*ısınma tipi.*doğrulanmamış.*otopark.*doğrulanmamış/is);
+    assert.doesNotMatch(facts, /kapalı otopark|kombi|Örnek Park Dairesi/);
+    assert.match(await send("Aslında Park Dairesi daha çok ilgimi çekti."), /Örnek Park Dairesi.*hangi bilgiyi/is);
+    assert.match(await send("O evin aidatı nedir?"), /Örnek Park Dairesi.*aidat.*doğrulanmamış/is);
+    assert.equal(await Appointment.countDocuments({ organizationId: org._id }), 0);
+    assert.equal(await AgentAction.countDocuments({ organizationId: org._id, name: "create_appointment" }), 0);
+    assert.equal((await Conversation.findById(conversationId).lean())?.bookingIntake ?? null, null);
+    assert.equal(modelCalls, 0);
+    const originalConversationId = conversationId;
+    const freshSession = await request(adapter).post("/api/widget/sessions").set(headers).send({ publicKey, locale: "tr" });
+    assert.equal(freshSession.status, 201);
+    auth = { ...headers, Authorization: `Bearer ${freshSession.body.token}` };
+    assert.equal((await request(adapter).get(`/api/widget/conversations/${originalConversationId}/messages`).set(auth)).status, 404);
+    conversationId = undefined;
+    await send(search);
+    assert.notEqual(conversationId, originalConversationId);
+    assert.match(await send("İkisinden hangisini önerirsin? Neden?"), /1\.500 TL/);
+    await send("DEMO — Örnek Park Dairesi ile örnek bahçe dairesi");
+    assert.equal((await state()).propertyFocusId ?? null, null);
+    assert.equal(await send(question), "Hangi ilanın bilgilerini istersiniz?");
+    assert.equal((await state()).propertyFocusId ?? null, null);
+    assert.equal(modelCalls, 1);
+  } finally {
+    env.experimentalReceptionistIntents = previous;
+  }
+});
+
+test("widget preserves Turkish budget, displayed pair and price reference across three intents", async () => {
+  const { env } = await import("../src/config/env.js");
+  const org = await Organization.create({ name: "Synthetic cross-intent conversation",
+    dailyBudgetMicros: 1_000_000, monthlyBudgetMicros: 1_000_000 });
+  await Listing.create(demoListings.slice(0, 3).map((listing, index) => ({ ...listing, organizationId: org._id,
+    facts: index === 1 ? { maintenanceFee: 0 } : {} })));
+  await Listing.create({ ...demoListings[1], organizationId: orgB, title: "Foreign matching price", facts: { maintenanceFee: 9876 } });
+  const publicKey = `ost_${crypto.randomUUID()}`;
+  await Assistant.create({ publicKey, name: "Synthetic assistant", instructions: "Synthetic",
+    organizationId: org._id, allowedOrigins: [websiteOrigin], conversationStrategy: "real_estate" });
+  const previous = env.experimentalReceptionistIntents;
+  env.experimentalReceptionistIntents = true;
+  try {
+    let calls = 0;
+    const respond: import("../src/services/ai.js").AIResponder = async () => {
+      calls++;
+      return { text: "Unexpected fallback", inputTokens: 0, outputTokens: 0 };
+    };
+    respond.interpretIntent = respond;
+    const adapter = createApp(respond);
+    adapter.set("trust proxy", 1);
+    const headers = { ...websiteHeaders, "X-Forwarded-For": "192.0.2.226" };
+    const chat = async () => {
+      const session = await request(adapter).post("/api/widget/sessions").set(headers).send({ publicKey, locale: "tr" });
+      assert.equal(session.status, 201);
+      const auth = { ...headers, Authorization: `Bearer ${session.body.token}` };
+      let id: string | undefined;
+      return {
+        send: async (text: string) => {
+          const response = await request(adapter).post("/api/widget/messages").set(auth)
+            .send({ text, conversationId: id, clientMessageId: crypto.randomUUID() });
+          assert.equal(response.status, 201, JSON.stringify(response.body));
+          id = response.body.conversationId;
+          return response.body.reply.text as string;
+        },
+        state: async () => (await Conversation.findById(id).lean())!.workflow!,
+        history: async () => request(adapter).get(`/api/widget/conversations/${id}/messages`).set(auth),
+      };
+    };
+    const search = "Selam, Nilüfer'de 30 bine kadar 3+1 kiralık ev arıyorum. Görükle de olur, 23 Nisan da olur. Eşyalı olması şart değil.";
+    const compare = "İki seçenek varsa göster. Ama sadece fiyat söyleyip geçme; hangisini neden önerdiğini de anlat.";
+    const fees = "Dur ya, 29 binlik olan hangisiydi? Aidatını söyle, depozitoyu da öğrenebilir miyiz?";
+    const first = await chat();
+    const initial = await first.send(search);
+    assert.match(initial, /27\.500 TL.*29\.000 TL/s);
+    assert.doesNotMatch(initial, /Foreign matching price|Özlüce|32\.000|bütçeniz nedir|eşyalı tercihinizi|tercihiniz var mı/i);
+    const state = await first.state();
+    assert.equal(state.business?.values.budget?.value, 30_000);
+    assert.deepEqual(state.business?.alternatives.location, ["Görükle", "23 Nisan"]);
+    assert.equal(state.business?.values.rooms?.value, 3);
+    assert.equal(state.business?.values.listingType?.value, "rent");
+    assert.equal(state.business?.values.furnished, undefined);
+    assert.equal(state.displayedListingIds?.length, 2);
+    const comparison = await first.send(compare);
+    assert.match(comparison, /1\.500 TL/);
+    assert.match(comparison, /115 m².*125 m²/s);
+    assert.doesNotMatch(comparison, /sessiz|iyi mahalle|İlanları karşılaştırabilir/i);
+    assert.equal((await first.state()).propertyFocusId ?? null, null);
+    const history = await first.history();
+    assert.equal(history.status, 200);
+    assert.equal(history.body.messages.at(-1).text, comparison);
+    assert.match(await first.send(fees), /Örnek Bahçe Dairesi.*aidat: 0 TL.*depozito.*doğrulanmamış/is);
+    assert.match(await first.send("Peki 27.500'lük olanın aidatı?"), /Örnek Park Dairesi.*aidat.*doğrulanmamış/is);
+    assert.match(await first.send("O evin depozitosu nedir?"), /Örnek Park Dairesi.*depozito.*doğrulanmamış/is);
+
+    await Listing.create({ ...demoListings[1], title: "Synthetic duplicate price", organizationId: org._id });
+    const second = await chat();
+    assert.match(await second.send(search), /Synthetic duplicate price/);
+    assert.match(await second.send(compare), /hangi iki ilan/i);
+    assert.match(await second.send(fees), /hangi ilan/i);
+    assert.equal((await second.state()).propertyFocusId ?? null, null);
+    assert.equal(await Appointment.countDocuments({ organizationId: org._id }), 0);
+    const boundary = await chat();
+    await Listing.create({ ...demoListings[0], title: "Synthetic exact budget boundary", organizationId: org._id, price: 30_000 });
+    const below = await boundary.send("Nilüfer'de 30 bin TL altı kiralık 3+1 daire arıyorum.");
+    assert.match(below, /29\.000 TL/);
+    assert.doesNotMatch(below, /32\.000 TL|30\.000 TL/);
+    const inclusive = await boundary.send("Nilüfer'de en fazla 30.000 TL kiralık 3+1 daire arıyorum.");
+    assert.match(inclusive, /Synthetic exact budget boundary.*30\.000 TL/);
+    assert.doesNotMatch(inclusive, /32\.000 TL/);
+    assert.equal(calls, 0);
+  } finally {
+    env.experimentalReceptionistIntents = previous;
+  }
 });

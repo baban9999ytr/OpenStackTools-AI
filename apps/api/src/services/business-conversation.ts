@@ -39,20 +39,35 @@ export function extractBusinessTurn(text: string, requestId: string, prior?: unk
   if (lastQuestion === "budget" && /^\d{1,9}$/.test(input.trim())) put("budget", Number(input), input);
   const name = /(?:^|[.,!]\s*)(?:ben|adım|adim|my name is|i am)\s+([\p{L}'’-]+(?:\s+[\p{Lu}][\p{L}'’-]+){0,2})(?=[.,!]|$)/iu.exec(input);
   if (name && !/değil|degil|not|adına/i.test(name[0])) put("name", name[1]!, name[0]);
-  for (const m of input.matchAll(/([\p{L}]+(?:\s+[\p{L}]+)?)[’'](?:de|da)\b/giu)) put("location", m[1]!.replace(/^(?:ben|in)\s+/i, ""), m[0]);
-  const location = /(?:location|konum|semt|mahalle)\s*:\s*([\p{L} ]{2,60})(?=[,.!?]|$)/iu.exec(input);
-  if (location) put("location", location[1]!.trim(), location[0]);
   for (const m of input.matchAll(/\b(\d{1,2})\s*\+\s*1\b/g)) if (Number(m[1]) <= 50) put("rooms", Number(m[1]), m[0]);
   const limits = statedListingLimit(input);
   const limit = limits[0];
-  for (const bound of limits) put("budget", bound.value, bound.evidence);
+  // Preserve offsets and split tokens at money spans before extracting a place.
+  // Blanking with whitespace would still let a two-word place span the budget.
+  const locationText = input.split("");
+  const maskMoney = (start: number, length: number) => locationText.fill(",", start, start + length);
+  for (const bound of limits) {
+    maskMoney(bound.start, bound.evidence.length);
+    put("budget", bound.value, bound.evidence);
+  }
   if (limit?.currency) put("currency", limit.currency, limit.evidence);
-  if (!limit) for (const m of input.matchAll(/\b(\d{1,3}(?:[.,]\d{3})+|\d{1,9})\s*(bin(?:e|in)?\b|k\b|TL\b|TRY\b|USD\b|EUR\b|GBP\b|lira\b|dolar\b|euro\b)/giu)) {
+  for (const m of input.matchAll(/\b(\d{1,3}(?:[.,]\d{3})+|\d{1,9})\s*(bin(?:e|in)?\b|k\b|TL\b|TRY\b|USD\b|EUR\b|GBP\b|lira\b|dolar\b|euro\b)/giu)) {
+    maskMoney(m.index, m[0].length);
+    if (limit) continue;
     const amount = Number(m[1]!.replace(/[.,]/g, "")) * (/^(bin|k)/i.test(m[2]!) ? 1000 : 1);
     if (amount <= 1e9) put("budget", amount, m[0]);
   }
-  for (const m of input.matchAll(/\b(TL|TRY|lira|USD|dolar|EUR|euro|GBP)\b/gi))
+  for (const m of input.matchAll(/\b(TL|TRY|lira|USD|dolar|EUR|euro|GBP)\b/gi)) {
+    maskMoney(m.index, m[0].length);
     put("currency", /^(TL|TRY|lira)$/i.test(m[1]!) ? "TRY" : /^(USD|dolar)$/i.test(m[1]!) ? "USD" : /^(EUR|euro)$/i.test(m[1]!) ? "EUR" : "GBP", m[0]);
+  }
+  const placeInput = locationText.join("");
+  for (const m of placeInput.matchAll(/(?<![\p{L}\p{N}])((?:[\p{L}]+|\d{1,2})(?:[ \t]+[\p{L}]+)?)[’'](?:de|da|te|ta)(?!\p{L})/giu)) {
+    if (/^\d+$/.test(m[1]!)) continue;
+    put("location", m[1]!.replace(/^(?:ben|in)\s+/i, ""), input.slice(m.index, m.index + m[0].length));
+  }
+  const location = /(?:location|konum|semt|mahalle)\s*:\s*([\p{L}\p{N} ]{2,60})(?=[,.!?]|$)/iu.exec(placeInput);
+  if (location) put("location", location[1]!.trim(), input.slice(location.index, location.index + location[0].length));
   const mappings: Array<[PreferenceField, string | boolean, RegExp]> = [
     ["propertyType", "apartment", /\bdaire\b|\bapartment\b/i], ["propertyType", "house", /\bmüstakil\b|\bhouse\b/i],
     ["propertyType", "land", /\barsa\b|\bland\b/i], ["propertyType", "commercial", /\bdükkan\b|\bcommercial\b/i],

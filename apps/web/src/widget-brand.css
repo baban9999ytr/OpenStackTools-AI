@@ -1,0 +1,38 @@
+/* Generated from brand/tokens.json v1.0.0. Do not edit directly. */
+:host {
+  --ost-font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+  --ost-page: #ffffff;
+  --ost-surface: #ffffff;
+  --ost-surface-soft: #f4f4f5;
+  --ost-text: #18181b;
+  --ost-muted: #52525b;
+  --ost-border: #d4d4d8;
+  --ost-accent: #0369a1;
+  --ost-accent-hover: #075985;
+  --ost-accent-subtle: #e0f2fe;
+  --ost-accent-text: #ffffff;
+  --ost-danger: #b91c1c;
+  --ost-danger-subtle: #fef2f2;
+  --ost-success: #166534;
+  --ost-success-subtle: #f0fdf4;
+  --ost-focus: #0284c7;
+  color-scheme: light;
+}
+:host([data-theme="dark"]) {
+  --ost-page: #09090b;
+  --ost-surface: #18181b;
+  --ost-surface-soft: #27272a;
+  --ost-text: #f4f4f5;
+  --ost-muted: #a1a1aa;
+  --ost-border: #3f3f46;
+  --ost-accent: #7dd3fc;
+  --ost-accent-hover: #bae6fd;
+  --ost-accent-subtle: #082f49;
+  --ost-accent-text: #082f49;
+  --ost-danger: #fca5a5;
+  --ost-danger-subtle: #450a0a;
+  --ost-success: #86efac;
+  --ost-success-subtle: #052e16;
+  --ost-focus: #7dd3fc;
+  color-scheme: dark;
+}

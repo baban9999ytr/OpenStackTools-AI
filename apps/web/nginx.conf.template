@@ -31,6 +31,7 @@ server {
   location /app/ { try_files $uri $uri/ /index.html; expires -1; }
   location = /index.html { expires -1; }
   location = /embed.js { try_files $uri =404; expires -1; }
+  location = /embed.css { try_files $uri =404; expires -1; }
   location /assets/ { try_files $uri =404; expires 1y; }
   location / { try_files $uri =404; }
 }

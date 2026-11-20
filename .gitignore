@@ -8,6 +8,7 @@ test-results/
 playwright-report/
 .DS_Store
 apps/web/public/embed.js
+apps/web/public/embed.css
 deploy/local-https/.secrets/
 __pycache__/
 apps/api/evals/prices.local.json

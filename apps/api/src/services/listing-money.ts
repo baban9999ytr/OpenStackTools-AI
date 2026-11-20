@@ -23,7 +23,7 @@ export function statedListingLimit(text: string) {
     const currency = /^(?:usd|dolar)$/.test(unit ?? "") ? "USD"
       : /^(?:eur|euro)$/.test(unit ?? "") ? "EUR" : unit === "gbp" ? "GBP"
         : unit || !/^(?:up to|under|below)$/.test(marker) ? "TRY" : undefined;
-    return [{ value, currency, exclusive: /^(?:alt|under|below)/.test(marker), evidence: text.slice(match.index, match.index + match[0].length) }];
+    return [{ value, currency, exclusive: /^(?:alt|under|below)/.test(marker), start: match.index, evidence: text.slice(match.index, match.index + match[0].length) }];
   });
 }
 

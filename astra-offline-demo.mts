@@ -12,7 +12,9 @@ import { recordedLunaPlans } from "./apps/api/evals/luna-integrated-widget-fixtu
 import { DEMO_OWNER_EMAIL, DEMO_ORGANIZATION_NAME } from "./apps/api/src/scripts/demo-data.js";
 import type { AIResponder } from "./apps/api/src/services/ai.js";
 
-const origin = "http://127.0.0.1:5198";
+const port = Number(process.env.ASTRA_OFFLINE_DEMO_PORT ?? 5198);
+if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid offline demo port");
+const origin = `http://127.0.0.1:${port}`;
 const dist = fileURLToPath(new URL("./apps/web/dist/", import.meta.url));
 await access(join(dist, "embed.js"));
 const cssAssets = new Map<string, string>();
@@ -120,7 +122,7 @@ try {
   app.use(createApp(respond));
 
   await new Promise<void>((resolve, reject) => {
-    server = app.listen(5198, "127.0.0.1", (error) => error ? reject(error) : resolve());
+    server = app.listen(port, "127.0.0.1", (error) => error ? reject(error) : resolve());
     server.once("error", reject);
   });
   const privateDir = await mkdtemp(join(tmpdir(), "astra-demo-login-"));

@@ -193,3 +193,51 @@ A separate read-only Luna metadata request returned HTTP 401 using the credentia
 The project owner confirmed that a current review cannot yet establish Responses write access, request and token quota, at least $0.020518 in available billing headroom, or applicable project and model spend limits. The owner reported a successful separate model metadata read. This does not change the preceding local HTTP 401 observation or establish generation entitlement. No project-review timestamp was set. No paid run or reservation was initiated.
 
 The private synthetic demo uses a separate loopback launcher, a disposable local MongoDB replica set, and the existing widget, dashboard, and appointment handlers. Two saved Luna responses are replayed as local fixtures. The demo launcher does not load project credentials. See [the offline demo guide](ASTRA_OFFLINE_DEMO.md).
+
+## Current repaired candidate — 20 November 2026
+
+**Provider-free PASS, live BLOCKED.** The historical live FAIL, offline results and unsuccessful project reviews above remain intact. No runner, fixture or corpus changes were made for this check.
+
+| Item | Result |
+| --- | --- |
+| Current source manifest SHA-256 | `62484deb41b3462a5fdbca843d86cc3d38658cee07c7b089511854013fd741c7` |
+| Unchanged corpus SHA-256 | `56be9bf296f5f8b1eeeb9d195272a0794897bef23d21567cfa82de02277bb823` |
+| Provider-free preflight pinned to both digests | **10/10 passed**, two observed inference boundaries, zero provider requests |
+| Planned live calls | At most two Standard Responses calls to `gpt-6-luna`, reasoning none, maximum 40,000 input and 512 output tokens per call, 30-second timeout, no synthesis or retries |
+| Fixed reservations and caps | **$0.010259 per call**, **$0.020518 combined**, **$0.021** global and per-model application caps |
+| Standing private ledger | **$0.200000 available**, zero settled, pending or uncertain amounts. Hypothetical balance during the full reservation is **$0.179482**. No reservation was entered. |
+
+The preflight used `launch-luna.mjs --preflight --suite=luna-integrated-widget` with the ignored `apps/api/.env` and both manifest gates. It completed the synthetic MongoDB widget flow through reload, explicit confirmation and duplicate confirmation. The two turns reached the same structured interpretation callback that invokes Luna in live mode. They cover the second listing's fee and deposit and the compound furnishing and weekend-viewing request. The replay used the recorded plans. Its respective input bounds were 18,912 and 19,704 tokens, with $0.004987 and $0.005185 in estimated prompt-bound reservations. The larger fixed reservation controls live admission. The private preflight output is in `/tmp/astra-final-luna-preflight.RqedtI/preflight.log`.
+
+Published Standard global Luna rates remain $0.10 input and $0.50 output per million tokens. Using $0.25 per million for every input token, the higher 12-hour cache-write rate, and adding $0.000003 rounding headroom gives $0.010259 per call. The documentation confirms Responses and structured outputs for Luna. Project-specific access and pricing still require owner verification. [OpenAI Standard pricing](https://developers.openai.com/api/docs/pricing?latest-pricing-expanded=true) · [GPT-6 Luna capabilities](https://developers.openai.com/api/docs/models/gpt-6-luna)
+
+A separate read-only model metadata check returned **HTTP 401** for the dedicated credential loaded locally. It sent no generation request. A current genuine project review is absent. The cause of the 401 was not established. Before execution, the owner must verify a usable credential in the same dedicated nonproduction project, enable or confirm Luna access and Responses write permission, verify current request and token quota for both calls, verify at least $0.020518 of billing headroom at the applicable Standard global rate, and verify the project/model limits and any organization spending controls that apply. Record the actual review time as `EVAL_REPAIRED_WIDGET_PROJECT_REVIEWED_AT` only after those checks. No paid test, live accuracy result, usage settlement or invoice evidence exists for this candidate. [OpenAI spend controls](https://developers.openai.com/api/docs/guides/spend-limits)
+
+**Supervised business pilot remains NO-GO.** Close the project gate and score the controlled live run, complete independent Turkish-language review of the raw decisions and customer-visible replies, and rehearse this exact candidate on the isolated HTTPS stage with the intended tenant’s consent and booking policy, widget origin, staff takeover and operator recovery procedures. Complete staff acceptance and operational sign-off before real visitor traffic. The running private demo was left untouched.
+
+### Authentication diagnosis
+
+**Live remains BLOCKED on an expired credential and incomplete project review.** The launcher receives `EVAL_PROJECT_API_KEY` from `apps/api/.env` through Node's explicit `--env-file` option and passes that credential to the benchmark child process. The ignored file contains a key matching the launcher's project-key format, with no surrounding whitespace. No inherited shell value overrode it. No alternate project ID or provider base URL was inherited.
+
+The read-only Luna metadata diagnosis returned HTTP **401**, API code `expired_secret_key`, and API type `invalid_request_error`. The documented IP allowlist error code is `ip_not_authorized`. The response identifies key expiry as this failure. Project membership, endpoint permissions and egress allowlisting still require an owner-side check for the replacement key. [OpenAI authentication errors](https://developers.openai.com/api/docs/guides/error-codes) · [IP allowlist verification](https://developers.openai.com/api/docs/guides/ip-allowlist?site_locale=en)
+
+The owner must replace the expired key in the ignored local dotenv using a valid key from the dedicated nonproduction project. Verify that it can read Luna model metadata and write Responses, and confirm Luna is enabled, the launcher egress is allowed if restricted, request and token quota cover the run, at least $0.020518 of billing headroom is available, and applicable project and organization spending controls are in place. Record the genuine UTC review time only after these checks. Once the owner completes the review, rerun one read-only metadata request before the digest-pinned live gates.
+
+No generation requests were sent. The private ledger remains at $0.200000 available with no outstanding reservations. The frozen runner, source and corpus were untouched.
+
+## Final live result — 20 November 2026
+
+**PARTIAL overall. Live application workflow PASS, raw Luna interpretation 1/2.** Historical FAIL and offline verification entries above remain intact.
+
+Owner-attested account review recorded at **2026-11-20T20:24:50Z**. The owner selected `OpenStackTools-AI-Testing` and confirmed the replacement key belonged to that nonproduction project and had All permissions. The owner reported $4.04 credit, a $1 organization limit, 2,000,000 TPM and 5,000 RPM. These account values were supplied by the owner. The prior read-only metadata check returned HTTP 200, and both successful Responses calls in this run verified live write access for the configured key.
+
+The source `62484deb41b3462a5fdbca843d86cc3d38658cee07c7b089511854013fd741c7` and corpus `56be9bf296f5f8b1eeeb9d195272a0794897bef23d21567cfa82de02277bb823` passed the dedicated digest gates. Standalone and launcher preflights both passed 10/10 with zero provider calls. The live suite ran once, made exactly two calls with zero retries and passed all ten application checkpoints. Neither call produced a provider error.
+
+| Call | Raw Luna decision and server outcome | Customer-visible reply | Provider usage and internal estimate |
+| --- | --- | --- | --- |
+| Second listing fee and deposit | Luna correctly identified listing 2 and both attributes, but added a comparison intent citing the preceding turn. The server rejected the entire advisory plan. Current-turn recovery answered from the listing record. | “Synthetic Garden Flat — aidat: 0 TL. depozito bilgisi kayıtlarda yok ve doğrulanmamış.” | 700 input, 145 output, 0 reasoning and cached tokens, 3.663 s, $0.000248. |
+| Furnishing and weekend viewing | Luna returned both intents with the focused listing reference. The server accepted the plan and used verified schedule data. | “Synthetic Garden Flat — Kayıtlara göre ilan eşyasız. Synthetic Garden Flat için gösterim saatleri: 21 Kasım Cumartesi saat 14.00 veya 21 Kasım Cumartesi saat 14.30 veya 21 Kasım Cumartesi saat 15.00. Hangisi size uyar?” | 781 input, 125 output, 0 reasoning and cached tokens, 4.427 s, $0.000259. |
+
+The slot action stayed pending through deferral and reload. Explicit confirmation created one appointment, and duplicate confirmation returned the same appointment without another booking. Total provider-reported usage was **1,481 input and 270 output tokens**, with zero reasoning or cached tokens. The application reconciled **$0.000507** in internal estimated cost. This is an estimate from reported usage. The ledger released **$0.020011** of the **$0.020518** reservation, leaving **$0.199493** available and zero pending or uncertain amounts.
+
+The private transcript at `/tmp/astra-luna-TP4J7t/luna.json` preserves both complete raw plans, acceptance outcomes, and every customer-visible checkpoint. Independent human-review fields remain blank. The supervised business pilot remains NO-GO pending independent Turkish-language review and the existing operational acceptance gates. No production settings or running demo state changed.

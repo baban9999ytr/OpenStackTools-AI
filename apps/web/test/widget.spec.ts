@@ -233,3 +233,40 @@ test("slow message reads do not create overlapping poll requests", async ({ page
   await expect.poll(() => reads, { timeout: 9000 }).toBeGreaterThanOrEqual(2);
   expect(maximum).toBe(1);
 });
+
+test("widget styles load in Shadow DOM under a strict host CSP", async ({ page }) => {
+  const widgetOrigin = "http://127.0.0.1:5173";
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.route(`${widgetOrigin}/strict-widget.html`, (route) => route.fulfill({
+    contentType: "text/html",
+    headers: { "Content-Security-Policy": `default-src 'none'; script-src ${widgetOrigin}; style-src ${widgetOrigin}; connect-src ${widgetOrigin}` },
+    body: `<!doctype html><html lang="tr"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script defer src="${widgetOrigin}/embed.js" data-ost-assistant="ost_test" data-ost-api="${widgetOrigin}" data-ost-theme="dark"></script></html>`,
+  }));
+  await page.addInitScript(() => {
+    document.addEventListener("securitypolicyviolation", (event) => {
+      document.documentElement.dataset.cspViolation = event.violatedDirective;
+    });
+  });
+  await page.route("**/api/widget/sessions", (route) => route.fulfill({
+    status: 201,
+    json: { token: "synthetic", expiresAt: new Date(Date.now() + 60_000).toISOString(), assistant: { name: "Test" } },
+  }));
+  await page.route("**/api/widget/sessions/current", (route) => route.fulfill({
+    json: { assistant: { name: "Test" }, conversationId: null, expiresAt: new Date(Date.now() + 60_000).toISOString() },
+  }));
+  await page.goto(`${widgetOrigin}/strict-widget.html`);
+  const widget = page.locator("[id^=openstacktools-widget-]");
+  const launch = widget.getByRole("button", { name: "Bizimle sohbet edin" });
+  await expect(launch).toHaveCSS("position", "fixed");
+  await expect(launch).toHaveCSS("right", "24px");
+  await launch.click();
+  const panel = widget.getByRole("region", { name: "İşletme sohbeti" });
+  await expect(panel).toHaveCSS("position", "fixed");
+  await expect(panel).toHaveCSS("background-color", "rgb(24, 24, 27)");
+  const box = await panel.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(320);
+  await expect(widget.getByRole("textbox")).toBeEnabled();
+  expect(await page.locator("html").getAttribute("data-csp-violation")).toBeNull();
+});

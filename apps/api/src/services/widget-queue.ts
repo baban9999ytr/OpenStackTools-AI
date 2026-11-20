@@ -773,8 +773,9 @@ export const processWidgetRequest = async (
     }
     if (savedIntake.success && (!savedIntake.data.actionId || bookingContactDeclined(request.text))) {
       const draft = savedIntake.data;
+      const submittedContact = requiresContact ? intakeContact(request.text, assistant.bookingContactMethod) : undefined;
       selectedAction = bookingContactDeclined(request.text) ? "booking_intake_declined" :
-        assistant.bookingNameRequired && !draft.name ? "booking_intake_name" : !draft.contact ? "booking_intake_contact" :
+        assistant.bookingNameRequired && !draft.name ? "booking_intake_name" : !draft.contact || submittedContact ? "booking_intake_contact" :
         bookingConsent(request.text) ? "booking_contact_permission_granted" : "booking_contact_permission_missing";
       diagnostic();
       const context = { organizationId: request.organizationId, assistantId: request.assistantId, conversationId: request.conversationId,
@@ -803,10 +804,11 @@ export const processWidgetRequest = async (
         const name = intakeName(request.text);
         if (name && !requiresContact) await propose({ ...draft, name });
         else await finish(name ? contactPrompt() : namePrompt, { ...draft, ...(name ? { name } : {}) });
-      } else if (!draft.contact) {
-        const contact = intakeContact(request.text, assistant.bookingContactMethod);
-        await finish(contact ? (trIntake ? "Yalnızca bu randevu için iletişime izin veriyorsanız “İletişime izin veriyorum” yazın. Bu adım randevu onayı değildir."
-          : "To permit contact about this booking only, say “I agree to booking contact”. This does not confirm the appointment.") : contactPrompt(), { ...draft, ...contact });
+      } else if (requiresContact && (!draft.contact || submittedContact)) {
+        const { consentAt: _consent, consentExplained: _guidance, ...unconsentedDraft } = draft;
+        await finish(submittedContact ? (trIntake ? "Yalnızca bu randevu için iletişime izin veriyorsanız “İletişime izin veriyorum” yazın. Bu adım randevu onayı değildir."
+          : "To permit contact about this booking only, say “I agree to booking contact”. This does not confirm the appointment.") : contactPrompt(),
+        submittedContact ? { ...unconsentedDraft, ...submittedContact } : draft);
       } else if (!bookingConsent(request.text)) {
         const guidance = draft.consentExplained
           ? (trIntake ? "İletişim izniniz henüz alınmadı. Randevu beklemede." : "Contact permission is still missing. No appointment has been booked.")
@@ -833,6 +835,15 @@ export const processWidgetRequest = async (
       synthesisOutcome = "skipped_confirmation_control";
       diagnostic();
       await finalizeControlRequest(requestId, confirmation.text, confirmation.actionId);
+      return;
+    }
+    const visitorContactRequest = requestedContactFields(request.text).length > 0 &&
+      /(?:önceki|başka|diğer)\s+(?:ziyaretçi|müşteri)|(?:previous|another|other|last)\s+(?:visitor|customer|guest)\b/iu.test(request.text);
+    if (visitorContactRequest) {
+      const locale = replyLocale(request.text, request.locale ?? "en");
+      await finalizeControlRequest(requestId, locale === "tr"
+        ? "Diğer ziyaretçilerin iletişim bilgilerini paylaşamam. İşletmenin iletişim bilgilerini isterseniz paylaşabilirim."
+        : "I can’t share another visitor’s contact details. I can provide the business’s public contact details if you need them.");
       return;
     }
     const prior = await Message.find({
@@ -864,7 +875,8 @@ export const processWidgetRequest = async (
       Conversation.findOne({ _id: request.conversationId, organizationId: request.organizationId,
         assistantId: request.assistantId, visitorId: request.visitorId }).select("workflow").lean(),
     ]);
-    const activeSearch = /back to|previous listings|those apartments|önceki ilan|o daireler|az önceki ilan/i.test(request.text)
+    const historicalListings = /back to|previous listings|those apartments|önceki ilan|o daireler|az önceki ilan|(?:eskiden|daha önce) gösterdi[ğg]in ilan/i.test(request.text);
+    const activeSearch = historicalListings
       ? previousNonEmptySearch ?? previousSearch : previousSearch;
     const scheduled = new Set(schedules.map((item) => item.staffId.toString()));
     const staff = await User.find({ _id: { $in: staffMembers.filter((member) => scheduled.has(member.userId.toString())).map((member) => member.userId) } }).select("name").lean();
@@ -925,6 +937,39 @@ export const processWidgetRequest = async (
       !workflowCancelIntent(request.text) && !requestedContactFields(request.text).length;
     const asksForFacts = requestedFacts.length && /\?|söyler|bilgin|nedir|ne kadar|hakkında bilgi|tell me|what|how much/i.test(request.text);
     const contextualProperty = /(?:^|\s)(?:o (?:ev|daire|ilan)\p{L}*|that (?:home|apartment|listing))(?=\s|[,.!?]|$)/iu.test(request.text);
+    if (assistant.conversationStrategy === "real_estate" && reference.unmatchedNeighborhood &&
+        !explicitSearch && !businessTurn.injection && !businessTurn.handoff &&
+        !workflowCancelIntent(request.text) && (asksForFacts || explicitViewing)) {
+      const only = previousListings.length === 1 ? previousListings[0] : undefined;
+      await finalizeControlRequest(requestId, tr
+        ? `Bahsettiğiniz konumda size daha önce gösterdiğim bir ilan yok.${only ? ` Şu ana kadar yalnızca ${only.title} ilanını gösterdim.` : ""} O konumda arama yapmamı ister misiniz?`
+        : "I haven’t shown you a listing in that location. Would you like me to search there?");
+      return;
+    }
+    if (readOnlyListingTurn && historicalListings && !requestedFacts.length &&
+        /hangisi.{0,14}ucuz|which.{0,14}(?:cheaper|cheapest)/i.test(request.text)) {
+      // Only historical records that were actually visible in the linked
+      // customer reply can participate. A stored search may return extra rows.
+      const historicalRequest = explicitEarlierSearch && activeSearch
+        ? await WidgetRequest.findOne({ organizationId: request.organizationId, conversationId: request.conversationId,
+          actionId: activeSearch._id, status: "completed" }).select("responseMessageId").lean()
+        : undefined;
+      const historicalMessage = historicalRequest?.responseMessageId
+        ? await Message.findOne({ _id: historicalRequest.responseMessageId, organizationId: request.organizationId,
+          conversationId: request.conversationId, role: "assistant" }).select("text").lean()
+        : undefined;
+      const shown = explicitEarlierSearch
+        ? displayedListingIds(historicalMessage?.text ?? "", searchListings)
+          .flatMap((id) => { const listing = byId.get(id); return listing ? [listing] : []; })
+        : previousListings;
+      const cheapest = listingReference("cheapest", shown).resolved;
+      await finalizeControlRequest(requestId, cheapest ? tr
+        ? `Önceki aramada gösterdiğim güncel ilanlar arasında ${cheapest.title}, ${priceText(cheapest, currentLocale)} ile en uygun fiyatlı olanıydı.`
+        : `Among the listings I previously showed that are still current, ${cheapest.title} is the lowest-priced at ${priceText(cheapest, currentLocale)}.`
+        : tr ? "Önceki ilanlardan tek bir en uygun fiyatı doğrulayamıyorum." : "I can’t verify a unique lowest price among the previous listings.",
+      undefined, undefined, true);
+      return;
+    }
     if (readOnlyListingTurn && asksForFacts &&
         (reference.named || reference.priced || contextualProperty || requestedFacts.some(([key]) => key === "heating" || key === "parking"))) {
       selectedAction = "property_facts";

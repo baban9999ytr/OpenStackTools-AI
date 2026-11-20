@@ -86,7 +86,7 @@ def expect(client, method, path, body, status, **kwargs):
 
 
 def main():
-    for path, expected in (("/app/assistants", 200), ("/embed.js", 200), ("/health/live", 200), ("/health/ready", 404)):
+    for path, expected in (("/app/assistants", 200), ("/embed.js", 200), ("/embed.css", 200), ("/health/live", 200), ("/health/ready", 404)):
         request = urllib.request.Request(BASE + path, method="GET")
         try:
             response = urllib.request.urlopen(request, context=TLS, timeout=5)

@@ -53,9 +53,16 @@ export function listingReference<T extends VerifiedListing>(text: string, listin
     }
     return matched;
   });
-  const byNeighborhood = listings.filter((item) => {
-    const neighborhood = listingWords(item.location.split(",").at(-1) ?? "").join(" ");
-    if (neighborhood.length < 3 || !present(neighborhood)) return false;
+  const locatives = [...lower.matchAll(/['’](?:d[ae]|t[ae])ki\s+(?:ev|daire|ilan)\p{L}*/gu)]
+    .map(({ index }) => ` ${listingWords(lower.slice(0, index)).join(" ")} `);
+  const neighborhoods = listings.map((item) => listingWords(item.location.split(",").at(-1) ?? "").join(" "));
+  const matchesLocative = (stem: string, neighborhood: string) =>
+    neighborhood.length >= 3 && stem.endsWith(` ${neighborhood} `);
+  const unmatchedNeighborhood = locatives.some((stem) => !neighborhoods.some((place) => matchesLocative(stem, place)));
+  const byNeighborhood = listings.filter((_, index) => {
+    const neighborhood = neighborhoods[index]!;
+    if (neighborhood.length < 3 || !(locatives.length
+      ? locatives.some((stem) => matchesLocative(stem, neighborhood)) : present(neighborhood))) return false;
     aliases.add(neighborhood);
     return true;
   });
@@ -68,13 +75,13 @@ export function listingReference<T extends VerifiedListing>(text: string, listin
   const prices = listingPriceReferences(text);
   const priceMatches = prices.map(({ price, currency }) => listings.filter((item) => item.price === price && item.currency === currency));
   const matches = [...new Set([...named, ...positions, ...priceMatches.flat()])];
-  if (indexes.length || named.length || prices.length) {
+  if (unmatchedNeighborhood || indexes.length || named.length || prices.length) {
     const remainder = [...aliases].sort((a, b) => b.length - a.length)
       .reduce((value, alias) => value.replaceAll(` ${alias} `, " "), phrase);
     const mentionOnly = named.length > 0 && !indexes.length && !prices.length &&
       remainder.trim().split(/\s+/).every((word) => ["", "demo", "ve", "ile", "and"].includes(word));
-    return { explicit: true, matches, named: named.length > 0, mentionOnly, priced: prices.length > 0,
-      resolved: matches.length === 1 && positions.length === indexes.length &&
+    return { explicit: true, matches, named: named.length > 0, mentionOnly, priced: prices.length > 0, unmatchedNeighborhood,
+      resolved: !unmatchedNeighborhood && matches.length === 1 && positions.length === indexes.length &&
         priceMatches.every((group) => group.length === 1) ? matches[0] : undefined };
   }
   const cheaper = /ucuz olan|cheaper one|cheapest/i.test(lower);
@@ -82,7 +89,7 @@ export function listingReference<T extends VerifiedListing>(text: string, listin
     const cheapest = Math.min(...listings.map((item) => item.price));
     matches.push(...listings.filter((item) => item.price === cheapest));
   }
-  return { explicit: cheaper, matches, named: false, mentionOnly: false, priced: false,
+  return { explicit: cheaper, matches, named: false, mentionOnly: false, priced: false, unmatchedNeighborhood: false,
     resolved: matches.length === 1 ? matches[0] : undefined };
 }
 

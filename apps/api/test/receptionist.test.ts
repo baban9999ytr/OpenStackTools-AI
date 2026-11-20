@@ -1839,3 +1839,88 @@ test("widget preserves Turkish budget, displayed pair and price reference across
     env.experimentalReceptionistIntents = previous;
   }
 });
+
+async function neighborhoodRegression(ip: number, rows: Array<{ title: string; location: string; price: number; fee: number }>) {
+  const org = await Organization.create({ name: "Synthetic neighborhood regression",
+    dailyBudgetMicros: 1_000_000, monthlyBudgetMicros: 1_000_000 });
+  await Listing.create(rows.map(({ fee, ...row }) => ({ ...row, organizationId: org._id, currency: "TRY",
+    description: "Synthetic only.", listingType: "rent", propertyType: "apartment", rooms: 3, areaSqm: 90,
+    availability: "available", facts: { maintenanceFee: fee } })));
+  const publicKey = `ost_${crypto.randomUUID()}`;
+  await Assistant.create({ publicKey, name: "Synthetic neighborhood assistant", instructions: "Synthetic.",
+    organizationId: org._id, allowedOrigins: [websiteOrigin], conversationStrategy: "real_estate" });
+  const adapter = createApp(async () => ({ text: "", inputTokens: 0, outputTokens: 0 }));
+  adapter.set("trust proxy", 1);
+  const headers = { ...websiteHeaders, "X-Forwarded-For": `192.0.2.${ip}` };
+  const session = await request(adapter).post("/api/widget/sessions").set(headers).send({ publicKey, locale: "tr" });
+  assert.equal(session.status, 201);
+  let id: string | undefined;
+  return {
+    org,
+    send: async (text: string) => {
+      const result = await request(adapter).post("/api/widget/messages").set(headers)
+        .set("Authorization", `Bearer ${session.body.token}`).send({ text, conversationId: id, clientMessageId: crypto.randomUUID() });
+      assert.equal(result.status, 201, JSON.stringify(result.body));
+      id = result.body.conversationId;
+      return result.body.reply.text as string;
+    },
+    state: () => Conversation.findById(id).lean(),
+  };
+}
+
+test("budget-first Turkish location stays outside monetary token spans", async () => {
+  const chat = await neighborhoodRegression(228, [
+    { title: "Park Dairesi", location: "Bursa, Nilüfer, Görükle", price: 27_500, fee: 650 },
+    { title: "Tam sınır", location: "Bursa, Nilüfer, Görükle", price: 28_000, fee: 250 },
+    { title: "Bütçe dışı", location: "Bursa, Nilüfer, Görükle", price: 28_001, fee: 350 },
+    { title: "Bahçe Dairesi", location: "Bursa, Nilüfer, 23 Nisan", price: 27_000, fee: 0 },
+  ]);
+  for (const text of [
+    "28 bine kadar Görükle'de 3+1 kiralık daire arıyorum.",
+    "Görükle’de 3+1 kiralık daire arıyorum, en fazla 28.000 TL.",
+    "En fazla 28.000 TL; Görükle’de 3+1 kiralık daire arıyorum.",
+  ]) {
+    const reply = await chat.send(text);
+    assert.match(reply, /Park Dairesi.*27\.500 TL/s);
+    assert.match(reply, /Tam sınır.*28\.000 TL/s);
+    assert.doesNotMatch(reply, /Bütçe dışı|Bahçe Dairesi/);
+    const workflow = (await chat.state())?.workflow;
+    assert.equal(workflow?.business?.values.location?.value, "Görükle");
+    assert.equal(workflow?.business?.values.budget?.value, 28_000);
+    assert.equal(workflow?.business?.values.rooms?.value, 3);
+    assert.equal(workflow?.business?.values.listingType?.value, "rent");
+  }
+  const strict = await chat.send("28.000 TL altı Görükle'de kiralık 3+1 daire arıyorum.");
+  assert.match(strict, /Park Dairesi/);
+  assert.doesNotMatch(strict, /Tam sınır|Bütçe dışı/);
+  const numeric = await chat.send("28 bin TL 23 Nisan’da kiralık 3+1 daire arıyorum.");
+  assert.match(numeric, /Bahçe Dairesi/);
+  assert.doesNotMatch(numeric, /Park Dairesi/);
+  assert.equal((await chat.state())?.workflow?.business?.values.location?.value, "23 Nisan");
+});
+
+test("locative-derived listing reference cannot substitute the existing focus", async () => {
+  const chat = await neighborhoodRegression(229, [
+    { title: "Park Dairesi", location: "Bursa, Nilüfer, Görükle", price: 27_500, fee: 650 },
+    { title: "Bilkent Dairesi", location: "Bursa, Nilüfer, Bilkent", price: 29_000, fee: 0 },
+  ]);
+  await Listing.create({ organizationId: orgB, title: "Foreign Balat Dairesi", location: "Balat", price: 25_000,
+    currency: "TRY", description: "Synthetic foreign canary.", listingType: "rent", propertyType: "apartment",
+    rooms: 3, areaSqm: 90, availability: "available", facts: { maintenanceFee: 9876 } });
+  assert.match(await chat.send("Görükle'de 30.000 TL altında kiralık 3+1 daire arıyorum."), /Park Dairesi/);
+  assert.match(await chat.send("Park Dairesi aidatı nedir?"), /650 TL/);
+  const focus = (await chat.state())?.workflow?.propertyFocusId;
+  assert.ok(focus);
+  const unknown = await chat.send("Balat'taki dairenin aidatı belli mi?");
+  assert.match(unknown, /daha önce gösterdiğim bir ilan yok/);
+  assert.doesNotMatch(unknown, /650 TL|Foreign|9\.876/);
+  assert.equal(String((await chat.state())?.workflow?.propertyFocusId), String(focus));
+  const mixed = await chat.send("Görükle listede vardı. Balat’taki dairenin aidatı belli mi?");
+  assert.match(mixed, /daha önce gösterdiğim bir ilan yok/);
+  assert.doesNotMatch(mixed, /650 TL/);
+  assert.match(await chat.send("Nilüfer'de 30.000 TL altında kiralık 3+1 daire arıyorum."), /Bilkent Dairesi/);
+  const known = await chat.send("Bilkent’teki dairenin aidatı ve depozitosu belli mi?");
+  assert.match(known, /Bilkent Dairesi.*aidat: 0 TL.*depozito.*doğrulanmamış/is);
+  assert.doesNotMatch(known, /650 TL|Foreign/);
+  assert.equal(await Appointment.countDocuments({ organizationId: chat.org._id }), 0);
+});

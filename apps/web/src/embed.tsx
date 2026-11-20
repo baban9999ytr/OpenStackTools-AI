@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { widgetBrandCss } from "./widget-brand";
+import "./widget-brand.css";
+import "./embed.css";
 
 type Message = {
   _id?: string;
@@ -20,7 +21,6 @@ type Saved = {
   conversationId?: string;
   pending?: Pending;
 };
-const css = `${widgetBrandCss}\n:host{font-family:var(--ost-font-sans);color:var(--ost-text)}*{box-sizing:border-box}.ost-launch{position:fixed;right:24px;bottom:24px;z-index:2147483647;border:0;border-radius:999px;background:var(--ost-accent);color:var(--ost-accent-text);padding:16px 20px;font:700 15px var(--ost-font-sans);box-shadow:0 10px 28px #09090b50;cursor:pointer}.ost-panel{position:fixed;right:24px;bottom:82px;z-index:2147483647;width:min(370px,calc(100vw - 32px));height:min(550px,calc(100vh - 110px));display:flex;flex-direction:column;background:var(--ost-surface);color:var(--ost-text);border:1px solid var(--ost-border);border-radius:12px;box-shadow:0 18px 60px #09090b50;overflow:hidden}.ost-head{background:var(--ost-surface-soft);border-bottom:1px solid var(--ost-border);padding:17px 20px;font-weight:700;display:flex;gap:12px;justify-content:space-between;align-items:center}.ost-head small{display:block;color:var(--ost-muted);font-weight:400;margin-top:3px}.ost-head button{background:transparent;color:var(--ost-text);border:1px solid var(--ost-border);border-radius:4px;padding:4px;font:inherit;cursor:pointer}.ost-messages{flex:1;overflow:auto;padding:16px;background:var(--ost-page)}.ost-message{max-width:85%;padding:9px 12px;margin:8px 0;border-radius:8px;background:var(--ost-surface-soft);white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}.ost-message.customer{margin-left:auto;background:var(--ost-accent-subtle)}.ost-form{display:flex;gap:8px;padding:12px;background:var(--ost-surface);border-top:1px solid var(--ost-border)}.ost-form input{flex:1;min-width:0;padding:10px;border:1px solid var(--ost-border);border-radius:8px;background:var(--ost-surface);color:var(--ost-text);font:inherit}.ost-form button{border:0;border-radius:8px;background:var(--ost-accent);color:var(--ost-accent-text);padding:10px 13px;font:700 13px var(--ost-font-sans);cursor:pointer}.ost-form button:disabled{opacity:.6}.ost-error{color:var(--ost-danger);padding:0 14px;font-size:13px}.ost-state{padding:0 14px;font-size:13px}.ost-retry{margin:0 14px 8px;background:var(--ost-surface);color:var(--ost-accent);border:1px solid var(--ost-border);border-radius:4px;padding:6px;cursor:pointer}:focus-visible{outline:2px solid var(--ost-focus);outline-offset:2px}`;
 
 const labels = {
   en: { assistant: "AI assistant", handoff: "A team member will reply here.", closed: "This conversation is closed.", sending: "Sending message…", waiting: "Waiting for a reply…", failed: "The assistant could not reply. Please try a new message.", uncertain: "Message status is uncertain. Retry uses the same message ID.", terminal: "No AI reply was sent. You can start a new message.", sendError: "Could not send message", connectionError: "Connection failed", lost: "Connection lost", startError: "Could not start chat", rateLimited: "Too many requests right now. Please wait before retrying.", budgetExhausted: "This business has reached its AI usage limit.", modelUnavailable: "The assistant's AI model is unavailable. Please contact the business team.", close: "Close chat", launch: "Chat with us", chat: "Business chat", privacy: "Messages are shared with this business.", clearLabel: "Clear this chat session", clear: "Clear chat", empty: "How can we help?", retry: "Retry message safely", input: "Your message", placeholder: "Write a message…", send: "Send" },
@@ -298,7 +298,6 @@ export function Widget({
   }
   return (
     <>
-      <style>{css}</style>
       <button
         className="ost-launch"
         type="button"
@@ -408,7 +407,14 @@ if (publicKey && apiBase) {
   const theme = explicitTheme === "light" || explicitTheme === "dark" ? explicitTheme : document.documentElement.dataset.theme === "dark" || (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
   const shadow = host.attachShadow({ mode: "open" });
   shadow.host.setAttribute("data-theme", theme);
-  createRoot(shadow).render(
+  const stylesheet = document.createElement("link");
+  stylesheet.rel = "stylesheet";
+  // Use the script host, which can differ from the API and the customer site.
+  stylesheet.href = new URL("embed.css", script.src).href;
+  const mount = () => createRoot(shadow.appendChild(document.createElement("div"))).render(
     <Widget publicKey={publicKey} apiBase={apiBase} language={language} />,
   );
+  stylesheet.addEventListener("load", mount, { once: true });
+  stylesheet.addEventListener("error", mount, { once: true });
+  shadow.append(stylesheet);
 }

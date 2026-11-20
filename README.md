@@ -46,6 +46,8 @@ Use separate terminals for the two dev commands. Vite proxies `/api` to the back
         defer></script>
 ```
 
+Serve `embed.js` and `embed.css` together from the same directory. The script loads its sibling stylesheet into the widget’s Shadow DOM. On the customer website, allow the exact widget asset origin in `script-src` and `style-src`, and the configured API origin in `connect-src`. If the site sets `script-src-elem` or `style-src-elem`, put the asset origin there as well. Inline script and stylesheet permissions are unnecessary. Keep the customer website’s exact origin in the assistant’s allowed origins.
+
 The public key is an identifier, not a credential. The browser requests a short-lived, origin-bound widget session. The widget is an original React component mounted in Shadow DOM. It does not use third-party artwork.
 
 For local testing, add the dashboard's exact origin (for example `http://localhost:5173`) to the assistant's allowed origins. The dashboard then shows **Test assistant**, which opens a same-origin page using the real widget, session, message queue and budgets. The preview is limited to loopback hosts. Inspect saved messages in **Conversations** and usage in **Usage**. A 429 pauses polling and honors `Retry-After`; a message retry keeps the same client message ID.

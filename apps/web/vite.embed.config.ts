@@ -12,6 +12,7 @@ export default defineConfig({
       name: "OpenStackToolsWidget",
       formats: ["iife"],
       fileName: () => "embed.js",
+      cssFileName: "embed",
     },
   },
 });

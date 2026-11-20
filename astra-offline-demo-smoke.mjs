@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { chromium, expect } from "@playwright/test";
 
-const origin = "http://127.0.0.1:5198";
+const port = Number(process.env.ASTRA_OFFLINE_DEMO_PORT ?? 5198);
+assert.ok(Number.isInteger(port) && port >= 1024 && port <= 65535, "Invalid offline demo port");
+const origin = `http://127.0.0.1:${port}`;
 const loginFile = process.argv[2];
 assert.ok(loginFile, "Pass the private owner.txt file path printed by the demo");
 const login = (await readFile(loginFile, "utf8")).trimEnd().split("\n");

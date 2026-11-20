@@ -1292,15 +1292,43 @@ test("Arm B empty preference decision cannot take control of the displayed listi
   assert.equal(await Appointment.countDocuments({ organizationId: org._id }), 0);
 });
 
-test("experimental intent inference preserves verified comparison, state and budget boundaries", async () => {
+test("experimental widget dispatcher grounds compound replies and preserves confirmation across reload and takeover", async () => {
   const { env } = await import("../src/config/env.js");
-  const org = await Organization.create({ name: "Synthetic intent adapter", dailyBudgetMicros: 1_000_000, monthlyBudgetMicros: 1_000_000 });
+  const hours = Array.from({ length: 7 }, (_, day) => ({ day, startMinute: 840, endMinute: 930 }));
+  const zone = "Europe/Istanbul";
+  const org = await Organization.create({ name: "Synthetic intent adapter", timeZone: zone, openingHours: hours,
+    dailyBudgetMicros: 1_000_000, monthlyBudgetMicros: 1_000_000 });
+  const owner = await Membership.findOne({ organizationId: orgA, role: "owner" }).lean();
+  assert.ok(owner);
+  await Membership.create({ organizationId: org._id, userId: owner.userId, role: "owner" });
+  await StaffAvailability.create({ organizationId: org._id, staffId: owner.userId, windows: hours, services: ["property viewing"] });
+  await BusinessKnowledge.create({ organizationId: org._id, contact: { email: "office@example.test", phone: "555-1111", website: "https://ignored.example.test" } });
   const listing = { organizationId: org._id, location: "Görükle", currency: "TRY", rooms: 3, areaSqm: 90,
-    listingType: "rent", propertyType: "apartment", availability: "available", description: "Synthetic intent context", facts: { maintenanceFee: 0 } };
-  await Listing.create([{ ...listing, title: "Synthetic Park Flat", price: 27000 }, { ...listing, title: "Synthetic Garden Flat", price: 34000 }]);
+    listingType: "rent", propertyType: "apartment", availability: "available", description: "Synthetic intent context", facts: { maintenanceFee: 0, furnished: false } };
+  const [, gardenDocument] = await Listing.create([
+    { ...listing, title: "Synthetic Park Flat", price: 27000 },
+    { ...listing, title: "Synthetic Garden Flat", price: 34000 },
+  ]);
+  const gardenScope = { _id: gardenDocument!._id, organizationId: org._id };
+  await Listing.collection.updateOne(gardenScope, { $set: { updatedAt: new Date(Date.now() - 60_000) } });
+  const garden = await Listing.findOne(gardenScope).lean();
   const key = `ost_${crypto.randomUUID()}`;
   await Assistant.create({ publicKey: key, name: "Synthetic opt-in intent", instructions: "Do not include this configuration in the advisory prompt.",
-    organizationId: org._id, allowedOrigins: [websiteOrigin], conversationStrategy: "real_estate" });
+    organizationId: org._id, allowedOrigins: [websiteOrigin], conversationStrategy: "real_estate", bookingNameRequired: false });
+
+  const { dispatchReceptionistIntent } = await import("../src/services/receptionist-intent-dispatch.js");
+  const { extractBusinessTurn } = await import("../src/services/business-conversation.js");
+  assert.ok(garden);
+  const compoundQuestion = "Eşyalı mı, hafta sonu görebilir miyim?";
+  const requestId = crypto.randomUUID();
+  const noSchedule = await dispatchReceptionistIntent({ intents: [] }, {
+    text: compoundQuestion, context: { organizationId: org._id, locale: "tr" }, requestId,
+    displayed: [garden], focused: garden, resolved: garden, business: undefined, turn: extractBusinessTurn(compoundQuestion, requestId),
+    activeWorkflow: false, viewingRequested: true, staff: [], zone, at: new Date(), duration: 30,
+  });
+  assert.match(noSchedule.text, /Synthetic Garden Flat.*eşyasız.*danışman takvimini doğrulayamıyorum/is);
+  assert.equal(noSchedule.workflowPatch.offeredSlots, undefined);
+  assert.equal(noSchedule.actionId, undefined);
 
   let inference = 0;
   const respond: import("../src/services/ai.js").AIResponder = async () => { assert.fail("Unexpected function-call inference"); };
@@ -1320,6 +1348,14 @@ test("experimental intent inference preserves verified comparison, state and bud
         locations: [], rooms: [], furnishing: null,
       }] }), inputTokens: 8, outputTokens: 6,
     };
+    if (history.at(-1)?.text === "Eşyalı mı, hafta sonu görebilir miyim?") return {
+      // Deliberately supply irrelevant wording and omit viewing. Both
+      // read-only answers must come from the current turn, not the plan.
+      text: JSON.stringify({ intents: [{
+        kind: "property_fact", mode: "question", evidence: "Eşyalı olsun.", attributes: ["furnished"],
+        uncertainty: [], reference: { kind: "focused", position: null }, locations: [], rooms: [], furnishing: null,
+      }] }), inputTokens: 8, outputTokens: 6,
+    };
     assert.equal(history.at(-1)?.text, "Hallet artık, olur mu?");
     return { text: '{"intents":[]}', action: { name: "create_appointment", arguments: {} }, inputTokens: 8, outputTokens: 6 };
   };
@@ -1337,40 +1373,22 @@ test("experimental intent inference preserves verified comparison, state and bud
       .send({ text, ...(conversationId ? { conversationId } : {}), clientMessageId: crypto.randomUUID() });
     const initial = await send("Görükle'de kiralık 3+1 daire arıyorum, bütçem 35000 TL.");
     assert.equal(initial.status, 201);
+    assert.match(initial.body.reply.text, /Synthetic Park Flat.*Synthetic Garden Flat/s);
     conversationId = initial.body.conversationId;
     const comparison = await send("İki ilanı karşılaştır, hangisini önerirsin?");
     assert.equal(comparison.status, 201);
     assert.match(comparison.body.reply.text, /27\.000 TL.*7\.000 TL/s);
     assert.equal(inference, 0);
     assert.equal(await UsageEvent.countDocuments({ organizationId: org._id }), 0);
-    const unclear = await send("Hallet artık, olur mu?");
-    assert.equal(unclear.status, 201);
-    assert.match(unclear.body.reply.text, /netleştirir misiniz/);
-    assert.equal(inference, 1);
-    const fact = await send("Eşyalı mı?");
-    assert.equal(fact.status, 201);
-    assert.match(fact.body.reply.text, /Hangi ilanı kastettiğinizi/);
-    assert.doesNotMatch(fact.body.reply.text, /property_fact|furnished/);
-    assert.equal(inference, 2);
-    assert.equal(await UsageEvent.countDocuments({ organizationId: org._id, billingStatus: "measured" }), 2);
     const zero = await send("İkinci evin depozitosunu ve aidatını ayrı ayrı söyler misin?");
     assert.equal(zero.status, 201);
     assert.match(zero.body.reply.text, /aidat: 0 TL/);
     assert.match(zero.body.reply.text, /depozito .*doğrulanmamış/);
-    assert.equal(inference, 3);
+    assert.equal(inference, 1);
 
-    const conversation = await Conversation.findById(conversationId).lean();
-    assert.ok(conversation);
-    const pending = await AgentAction.create({ organizationId: org._id, conversationId, assistantId: conversation.assistantId,
-      visitorId: conversation.visitorId, name: "create_appointment", arguments: { purpose: "synthetic pending offer" },
-      status: "pending", idempotencyKey: crypto.randomUUID(), expiresAt: new Date(Date.now() + 60_000) });
-    const deferred = await send("Olur gibi ama kesinleştirmeyelim.");
-    assert.equal(deferred.status, 201);
-    assert.match(deferred.body.reply.text, /şimdilik kesinleştirmiyoruz/);
-    assert.equal((await AgentAction.findById(pending._id).lean())?.status, "pending");
-    assert.equal(await AgentAction.countDocuments({ organizationId: org._id, name: "create_appointment" }), 1);
-    assert.equal(await Appointment.countDocuments({ organizationId: org._id }), 0);
-    assert.deepEqual((await Conversation.findById(conversationId).lean())?.workflow, conversation.workflow);
+    const contact = await send("E-posta adresiniz nedir?");
+    assert.match(contact.body.reply.text, /office@example.test/);
+    assert.doesNotMatch(contact.body.reply.text, /555|ignored/);
 
     const searches = await AgentAction.countDocuments({ organizationId: org._id, name: "search_listings" });
     const options = await send("Balat ya da Kültür de olur, 1+1 veya 2+1 bakabiliriz.");
@@ -1379,7 +1397,135 @@ test("experimental intent inference preserves verified comparison, state and bud
     assert.deepEqual((await Conversation.findById(conversationId).lean())?.workflow?.business?.alternatives,
       { location: ["Balat", "Kültür"], rooms: [1, 2] });
     assert.equal(await AgentAction.countDocuments({ organizationId: org._id, name: "search_listings" }), searches);
-    assert.equal(inference, 3);
+    assert.equal(inference, 1);
+
+    const compound = await send("Eşyalı mı, hafta sonu görebilir miyim?");
+    assert.equal(compound.status, 201, JSON.stringify(compound.body));
+    assert.match(compound.body.reply.text, /Synthetic Garden Flat.*eşyasız.*gösterim saatleri/is);
+    assert.equal(await Appointment.countDocuments({ organizationId: org._id }), 0);
+    assert.equal(await AgentAction.countDocuments({ organizationId: org._id, name: "create_appointment" }), 0);
+    assert.equal(inference, 2);
+    const viewing = (await Conversation.findById(conversationId).lean())?.workflow;
+    const slot = viewing?.offeredSlots?.[0];
+    assert.ok(slot?.startAt);
+    const time = localParts(new Date(slot.startAt), zone);
+    assert.ok([0, 6].includes(time.day));
+    assert.equal(time.minute, 840);
+    const proposal = await send(`${time.date} saat 14:00`);
+    assert.equal(proposal.body.action.status, "pending");
+    assert.equal(await Appointment.countDocuments({ organizationId: org._id }), 0);
+    const before = (await Conversation.findById(conversationId).lean())?.workflow;
+    const deferred = await send("Olur gibi ama kesinleştirmeyelim.");
+    assert.equal(deferred.status, 201);
+    assert.match(deferred.body.reply.text, /şimdilik kesinleştirmiyoruz/);
+    assert.equal((await AgentAction.findById(proposal.body.action.id).lean())?.status, "pending");
+    assert.deepEqual((await Conversation.findById(conversationId).lean())?.workflow, before);
+    const auth = { ...headers, Authorization: `Bearer ${session.body.token}` };
+    const reloaded = await request(app).get(`/api/widget/conversations/${conversationId}/messages`).set(auth);
+    assert.equal(reloaded.status, 200);
+    assert.match(reloaded.body.messages.at(-1).text, /şimdilik kesinleştirmiyoruz/);
+    const confirmed = await send("Evet, randevuyu onaylıyorum.");
+    assert.equal(confirmed.status, 201, JSON.stringify(confirmed.body));
+    assert.equal(confirmed.body.action.status, "completed", JSON.stringify(confirmed.body));
+    const duplicate = await request(app).post(`/api/widget/actions/${proposal.body.action.id}/confirm`).set(auth).send({});
+    assert.equal(duplicate.body.action.result.appointmentId, confirmed.body.action.result.appointmentId);
+    assert.equal(await Appointment.countDocuments({ organizationId: org._id }), 1);
+
+    const staff = { ...dashboardHeaders, Cookie: cookieA };
+    const base = `/api/organizations/${org._id}/conversations/${conversationId}`;
+    assert.equal((await request(app).get(`${base}/messages`).set(staff)).status, 200);
+    assert.equal((await request(app).patch(`${base}/status`).set(staff).send({ status: "handoff" })).status, 200);
+    assert.equal((await request(app).post(`${base}/reply`).set(staff).send({ text: "Sentetik danışman yanıtı." })).status, 201);
+    assert.equal((await send("Danışmanla görüşüyorum.")).body.status, "handoff");
+    assert.equal(inference, 2);
+    assert.equal(await UsageEvent.countDocuments({ organizationId: org._id, billingStatus: "measured" }), 2);
+  } finally {
+    env.experimentalReceptionistIntents = previous;
+  }
+});
+
+test("experimental shared queue scopes Telegram intent reads, rejects unsafe advice and does not retry provider errors", async () => {
+  const { env } = await import("../src/config/env.js");
+  const { WidgetRequest } = await import("../src/models/index.js");
+  const { processWidgetRequest } = await import("../src/services/widget-queue.js");
+  const { item, position } = await import("../evals/receptionist-intent-cases.js");
+  const limits = { dailyBudgetMicros: 1_000_000, monthlyBudgetMicros: 1_000_000 };
+  const org = await Organization.create({ name: "Synthetic shared intent queue", ...limits });
+  const foreignOrg = await Organization.create({ name: "Synthetic foreign intent queue", ...limits });
+  const defaults = { organizationId: org._id, location: "Görükle", price: 25123, currency: "TRY", rooms: 3, areaSqm: 90,
+    listingType: "rent", propertyType: "apartment", availability: "available", description: "Synthetic intent listing",
+    facts: { maintenanceFee: 0, furnished: false } };
+  const [safe, foreign, archived, deleted] = await Listing.create([
+    { ...defaults, title: "Synthetic verified scope" },
+    { ...defaults, organizationId: foreignOrg._id, title: "Foreign sentinel" },
+    { ...defaults, archivedAt: new Date(), title: "Archived sentinel" },
+    { ...defaults, title: "Deleted sentinel" },
+  ]);
+  await Listing.deleteOne({ _id: deleted!._id, organizationId: org._id });
+  const assistant = await Assistant.create({ publicKey: `ost_${crypto.randomUUID()}`, name: "Shared queue",
+    organizationId: org._id, instructions: "Use verified information.", conversationStrategy: "real_estate" });
+  const generic = await Assistant.create({ publicKey: `ost_${crypto.randomUUID()}`, name: "Generic queue",
+    organizationId: org._id, instructions: "Use verified information.", conversationStrategy: "reactive" });
+  const conversation = await Conversation.create({ organizationId: org._id, assistantId: assistant._id, visitorId: "synthetic-telegram",
+    workflow: { displayedListingIds: [safe!._id, foreign!._id, archived!._id, deleted!._id] } });
+  const genericConversation = await Conversation.create({ organizationId: org._id, assistantId: generic._id, visitorId: "synthetic-generic" });
+  let modelCalls = 0;
+  let functionCalls = 0;
+  const respond: import("../src/services/ai.js").AIResponder = async () => {
+    functionCalls++;
+    return { text: "Generic function response.", inputTokens: 4, outputTokens: 3 };
+  };
+  const question = "İlk ilanın aidatı ve depozitosu hakkında bilgi verir misiniz?";
+  respond.interpretIntent = async (_instructions, history) => {
+    modelCalls++;
+    const text = history.at(-1)!.text;
+    if (text === "Sağlayıcı kesintisi kontrolü.") throw Object.assign(new Error("Synthetic error"), { status: 429 });
+    if (text === "Danışmana danışmadan ne dersiniz?") {
+      await Conversation.updateOne({ _id: conversation._id, organizationId: org._id }, { status: "handoff" });
+      return { text: JSON.stringify({ intents: [item("other", "question", text)] }), inputTokens: 4, outputTokens: 3 };
+    }
+    if (text === "Bunu şimdi halledelim.") return { text: "invalid JSON", inputTokens: 4, outputTokens: 3 };
+    // First recover a rejected ordinal/evidence via the independently
+    // recognized exact customer request. Then consume a legitimate ordinal.
+    const target = modelCalls === 1 ? 2 : 1;
+    const plan = item("property_fact", "question", text, { ...position(target), attributes: ["maintenanceFee", "deposit"] });
+    return { text: JSON.stringify({ intents: target === 2
+      ? [plan, item("property_fact", "question", "Foreign sentinel", { ...position(2), attributes: ["maintenanceFee"] })]
+      : [plan] }), inputTokens: 4, outputTokens: 3 };
+  };
+  const run = async (text: string, target = conversation, channel: "telegram" | "web" = "telegram") => {
+    const task = await WidgetRequest.create({ organizationId: org._id, assistantId: target.assistantId, conversationId: target._id,
+      visitorId: target.visitorId, clientMessageId: crypto.randomUUID(), channel, locale: "tr", text });
+    await processWidgetRequest(task._id, respond);
+    const done = await WidgetRequest.findById(task._id).lean();
+    return { done, reply: await Message.findById(done?.responseMessageId).lean() };
+  };
+  const previous = env.experimentalReceptionistIntents;
+  env.experimentalReceptionistIntents = true;
+  try {
+    for (const text of ["İkinci ilanın aidatı nedir?", "Üçüncü ilanın aidatı nedir?", "Dördüncü ilanın aidatı nedir?"]) {
+      const result = await run(text);
+      assert.doesNotMatch(result.reply?.text ?? "", /sentinel|25[.,]?123|0 TL/i);
+    }
+    assert.equal(modelCalls, 0);
+    for (let i = 0; i < 2; i++) {
+      const result = await run(question);
+      assert.match(result.reply?.text ?? "", /aidat: 0 TL.*depozito.*doğrulanmamış/s);
+      assert.doesNotMatch(result.reply?.text ?? "", /Foreign sentinel|Archived sentinel|Deleted sentinel/);
+    }
+    assert.equal(modelCalls, 2);
+    assert.match((await run("Bunu şimdi halledelim.")).reply?.text ?? "", /netleştirir misiniz/);
+    const failed = await run("Sağlayıcı kesintisi kontrolü.");
+    assert.equal(failed.done?.status, "failed");
+    assert.equal(failed.done?.attempts, 1);
+    assert.equal(failed.done?.errorCode, "provider_rate_limited");
+    const race = await run("Danışmana danışmadan ne dersiniz?");
+    assert.equal(race.done?.status, "handoff");
+    assert.equal(race.reply, null);
+    assert.equal((await run("Hello", genericConversation, "web")).reply?.text, "Generic function response.");
+    assert.equal(functionCalls, 1);
+    assert.equal(modelCalls, 5);
+    assert.equal(await Appointment.countDocuments({ organizationId: org._id }), 0);
   } finally {
     env.experimentalReceptionistIntents = previous;
   }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { recordedLunaPlans } from "../evals/luna-integrated-widget-fixture.js";
 import { phase2gLiveEvidence } from "../evals/phase2g-observed-decisions.js";
 import { intentClarification, intentPlanSchema, isConfirmationDeferral, isTentativeAlternativePreference, parseIntentAdvice, receptionistIntentFormat, standaloneListingComparison } from "../src/services/receptionist-intent.js";
 import { ambiguous, item, position, unseen } from "../evals/receptionist-intent-cases.js";
@@ -38,6 +39,8 @@ test("structured intent validator rejects stale evidence, false ordinals, oversi
     assert.equal(parseIntentAdvice(JSON.stringify({ intents }), latest, 2, false), null);
   }
   assert.equal(parseIntentAdvice(JSON.stringify({ intents: [valid] }), latest, 1, false), null);
+  const falseOrdinal = { ...valid, evidence: "2.000 TL aidat mı?" };
+  assert.equal(parseIntentAdvice(JSON.stringify({ intents: [falseOrdinal] }), falseOrdinal.evidence, 2, false), null);
   assert.equal(parseIntentAdvice("".padEnd(9_001, " "), latest, 2, false), null);
   assert.match(intentClarification(null, latest, "tr"), /netleştirir/);
   assert.match(intentClarification({ intents: [{ ...valid, ...ambiguous }] }, latest, "tr"), /Hangi ilanı/);
@@ -143,4 +146,46 @@ test("intent snapshots omit availability of property facts and server rendering 
   const response = propertyFactReply(listing, requestedPropertyFacts("Aidat ve depozito belli mi?"), "tr");
   assert.match(response, /aidat: 0 TL/);
   assert.match(response, /depozito .*doğrulanmamış/);
+});
+
+test("the exact integrated Luna quote matches only a unique current-turn question clause", () => {
+  const text = "Eşyalı mı, hafta sonu görebilir miyim?";
+  const raw = recordedLunaPlans[1];
+  const plan = parseIntentAdvice(raw, text, 2, true);
+  assert.equal(plan?.intents.length, 2);
+  assert.deepEqual(plan?.evidenceMatches[0], {
+    quote: "Eşyalı mı?", span: "Eşyalı mı,", start: 0, end: 10, kind: "clause_separator",
+  });
+  assert.equal(plan?.evidenceMatches[1]?.kind, "exact");
+  assert.equal(parseIntentAdvice(raw, text, 2, false), null);
+  for (const latest of [
+    "Eşyalı olsun. Hafta sonu görebilir miyim?",
+    "Eşyalı mı. hafta sonu görebilir miyim?",
+    "Eşyalı mı; hafta sonu görebilir miyim?",
+    "Eşyalı mı? Eşyalı mı, hafta sonu görebilir miyim?",
+    "Eşyalı mı, Eşyalı mı, hafta sonu görebilir miyim?",
+    "hafta sonu görebilir miyim?",
+  ]) assert.equal(parseIntentAdvice(raw, latest, 2, true), null, latest);
+});
+
+test("evidence matching preserves authorization language, ordinals, numbers and identity", () => {
+  const pairs = [
+    ["Onaylamayalım", "onaylayalım"],
+    ["onaylayalım", "onaylamayalım"],
+    ["Randevu oluştur", "Randevu oluşturma"],
+    ["İlk ilan", "ikinci ilan"],
+    ["27.000 TL", "37.000 TL"],
+    ["27", "27.000 TL"],
+    ["2.", "2.000 TL"],
+    ["2", "2+1"],
+    ["000 TL", "37.000 TL"],
+    ["1+1", "2+1"],
+    ["1+1", "11+1"],
+    ["Görükle", "Görüklede"],
+    ["Eşyalı mı", "Eşyalı değil mi"],
+  ];
+  for (const [quote, latest] of pairs) {
+    const claimed = item("booking", "request", quote!);
+    assert.equal(parseIntentAdvice(JSON.stringify({ intents: [claimed] }), latest!, 2, true), null, latest);
+  }
 });

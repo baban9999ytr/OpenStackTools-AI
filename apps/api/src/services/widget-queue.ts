@@ -1,4 +1,5 @@
-import { intentClarification, isConfirmationDeferral, isTentativeAlternativePreference, parseIntentAdvice, receptionistIntentInstructions, standaloneListingComparison } from "./receptionist-intent.js";
+import { dispatchReceptionistIntent, scopedContactReply, standaloneContactQuestion, standalonePropertyQuestion } from "./receptionist-intent-dispatch.js";
+import { isConfirmationDeferral, isTentativeAlternativePreference, parseIntentAdvice, receptionistIntentInstructions, standaloneListingComparison } from "./receptionist-intent.js";
 import { receptionistDecisionContext, receptionistDecisionSnapshot } from "./receptionist-decision.js";
 import { asksForWeekendViewing, propertyFactReply, requestedPropertyFacts } from "./property-facts.js";
 import { requestedContactFields } from "./business-data.js";
@@ -44,7 +45,7 @@ import { displayedListingIds, formatListingReply, listingFollowUpIntent, type Ve
 import { combineProviderUsage, synthesisIsGrounded, verifiedFactsForSynthesis } from "./synthesis.js";
 import { handleTextConfirmation } from "./universal-confirmation.js";
 import { introducedName, isViewingRequest, nameAnswer, personalityInstructions, platformConversationRules,
-  selectedListingFromText, shortVisitorWindow, simpleAssent, workflowResumeIntent, workflowCancelIntent } from "./conversation-flow.js";
+  selectedListingFromText, hasHigherListingOrdinal, shortVisitorWindow, simpleAssent, workflowResumeIntent, workflowCancelIntent } from "./conversation-flow.js";
 import { prohibitedOperationalRequest, safetyReply } from "./conversation-safety.js";
 import { interpretVisitorTurn, planVisitorTurn, verifiedListingInformation, validatePreferenceCandidate } from "./turn-interpretation.js";
 import { flexibleDatePlan, findFlexibleSlots, type OfferedSlot } from "./flexible-scheduling.js";
@@ -287,7 +288,7 @@ const recordCustomerMessage = async (
   request: typeof WidgetRequest.prototype,
   session?: mongoose.ClientSession,
 ) => {
-  await Message.updateOne(
+  return Message.findOneAndUpdate(
     { requestId: request._id, role: "customer" },
     {
       $setOnInsert: {
@@ -299,9 +300,14 @@ const recordCustomerMessage = async (
         requestId: request._id,
       },
     },
-    { upsert: true, session },
-  );
+    { upsert: true, returnDocument: "after", session },
+  ).orFail();
 };
+
+// History sorts by creation time, then by ObjectId. A MongoDB upsert and an
+// application-generated reply can have unrelated ObjectId order in the same ms.
+const replyCreatedAt = (customerCreatedAt: Date) =>
+  new Date(Math.max(mongoose.now().getTime(), customerCreatedAt.getTime() + 1));
 
 type WorkflowPatch = Partial<{ business: BusinessState; propertyFocusId: mongoose.Types.ObjectId | null; displayedListingIds: mongoose.Types.ObjectId[]; selectedListingId: mongoose.Types.ObjectId | null; preferredDate: string | null; preferredMinute: number | null;
   offeredSlots: OfferedSlot[] | null;
@@ -321,13 +327,17 @@ const finalizeControlRequest = async (requestId: mongoose.Types.ObjectId, text: 
     const conversation = await Conversation.findOne({ _id: request.conversationId, organizationId: request.organizationId,
       processingRequestId: requestId }).session(session);
     if (!conversation) throw new Error("Conversation lease was lost");
-    await recordCustomerMessage(request, session);
-    const [reply] = await Message.create([{ organizationId: request.organizationId, conversationId: request.conversationId,
-      role: "assistant", text, requestId, ...(retrieval ? { source: "retrieval" } : {}) }], { session });
-    await WidgetRequest.updateOne({ _id: requestId, status: "processing" }, { $set: { status: "completed",
+    const customer = await recordCustomerMessage(request, session);
+    const ownHandoff = conversation.status === "handoff" && actionId && await AgentAction.exists({
+      _id: actionId, organizationId: request.organizationId, conversationId: request.conversationId, name: "handoff_to_human",
+    }).session(session);
+    const allowReply = conversation.status === "bot" || Boolean(ownHandoff);
+    const [reply] = allowReply ? await Message.create([{ organizationId: request.organizationId, conversationId: request.conversationId,
+      role: "assistant", text, requestId, createdAt: replyCreatedAt(customer.createdAt), ...(retrieval ? { source: "retrieval" } : {}) }], { session }) : [];
+    await WidgetRequest.updateOne({ _id: requestId, status: "processing" }, { $set: { status: allowReply ? "completed" : "handoff",
       ...(reply ? { responseMessageId: reply._id } : {}), ...(actionId ? { actionId } : {}) },
       $unset: { leaseUntil: 1 } }, { session });
-    if (workflowPatch) await Conversation.updateOne({ _id: request.conversationId, organizationId: request.organizationId,
+    if (workflowPatch && conversation.status === "bot") await Conversation.updateOne({ _id: request.conversationId, organizationId: request.organizationId,
       processingRequestId: requestId }, workflowMutation(workflowPatch), { session });
     await releaseConversation(requestId, session);
   }); } finally { await session.endSession(); }
@@ -447,6 +457,8 @@ const finalizeSuccess = async (
       );
       let responseMessageId: mongoose.Types.ObjectId | undefined;
       if (conversation.status === "bot") {
+        const customer = await Message.findOne({ requestId, organizationId: request.organizationId,
+          conversationId: request.conversationId, role: "customer" }).select("createdAt").session(session).orFail();
         const [reply] = await Message.create(
           [
             {
@@ -454,6 +466,7 @@ const finalizeSuccess = async (
               conversationId: request.conversationId,
               role: "assistant",
               text: answer.text,
+              createdAt: replyCreatedAt(customer.createdAt),
               ...(answer.retrieval || answer.action && ["get_business_knowledge", "search_listings"].includes(answer.action.name) ? { source: "retrieval" } : {}),
               requestId: request._id,
             },
@@ -480,10 +493,11 @@ const finalizeSuccess = async (
         },
         { session },
       );
+      const patch = conversation.status === "bot" ? answer.workflowPatch ?? {} : {};
       await Conversation.updateOne(
         { _id: conversation._id },
-        { $set: { updatedAt: new Date(), ...Object.fromEntries(Object.entries(answer.workflowPatch ?? {}).filter(([, value]) => value !== null).map(([key, value]) => [`workflow.${key}`, value])) },
-          $unset: Object.fromEntries(Object.entries(answer.workflowPatch ?? {}).filter(([, value]) => value === null).map(([key]) => [`workflow.${key}`, 1])) },
+        { $set: { updatedAt: new Date(), ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== null).map(([key, value]) => [`workflow.${key}`, value])) },
+          $unset: Object.fromEntries(Object.entries(patch).filter(([, value]) => value === null).map(([key]) => [`workflow.${key}`, 1])) },
         { session },
       );
       await releaseConversation(requestId, session);
@@ -573,6 +587,7 @@ export const processWidgetRequest = async (
   }
   const processingStarted = performance.now();
   let modelCalls = 0;
+  let structuredCall = false;
   let modelAction = "none";
   let selectedAction = "none";
   let synthesisOutcome = "not_applicable";
@@ -580,10 +595,11 @@ export const processWidgetRequest = async (
   let followUpIntent = "none";
   let priorListingCount = 0;
   let availabilityDecision: Record<string, string | number> | undefined;
+  let intentEvidence: Array<{ kind: string; start: number; end: number }> | undefined;
   const diagnostic = (answer?: AIReply) => logger.info({
     requestId: requestId.toString(), conversationId: request.conversationId.toString(), organizationId: request.organizationId.toString(),
     latencyMs: Math.round(performance.now() - processingStarted), modelAction, selectedAction, followUpIntent, priorListingCount, availabilityDecision,
-    synthesisOutcome, fallbackReason, modelCalls,
+    synthesisOutcome, fallbackReason, modelCalls, intentEvidence,
     inputTokens: answer?.inputTokens ?? 0, outputTokens: answer?.outputTokens ?? 0,
     reasoningTokens: answer?.reasoningTokens ?? 0, cachedInputTokens: answer?.cachedInputTokens ?? 0,
   }, "Widget AI decision");
@@ -696,7 +712,7 @@ export const processWidgetRequest = async (
     priorListingCount = previousListings.length;
     const workflowListing = byId.get(String(workflow?.selectedListingId));
     const propertyFocus = byId.get(String(workflow?.propertyFocusId));
-    const explicitSelector = /[iİ]lkini|[iİ]kincisini|(?:[iİ]lk|birinci|[iİ]kinci)\s+(?:ilan|daire|ev(?:in|i|de|den)?\b)|ucuz olan|cheaper one|\b(?:first|second|1st|2nd|cheapest)\b/i.test(request.text);
+    const explicitSelector = /[iİ]lkini|[iİ]kincisini|(?:[iİ]lk|birinci|[iİ]kinci)\s+(?:ilan|daire|ev(?:in|i|de|den)?\b)|ucuz olan|cheaper one|\b(?:first|second|1st|2nd|cheapest)\b/i.test(request.text) || hasHigherListingOrdinal(request.text);
     const otherListing = /\bdiğeri\p{L}*|\b(?:the other one|the other listing)\b/iu.test(request.text);
     const focusId = workflow?.propertyFocusId ?? workflow?.selectedListingId;
     const focus = workflow?.propertyFocusId ? propertyFocus : workflowListing;
@@ -751,6 +767,10 @@ export const processWidgetRequest = async (
         undefined, { business: state });
       return;
     }
+    const requestedContact = requestedContactFields(request.text);
+    const explicitViewing = weekendViewing || isViewingRequest(request.text) || asksForPropertyViewing(request.text);
+    const mixedContact = experimentalIntents && requestedContact.length > 0 &&
+      (explicitViewing || requestedFacts.length > 0 || Object.keys(businessTurn.alternatives).length > 0);
     const explicitSearch = /arıyorum|ariyorum|ilan.{0,18}(?:bul|listele)|looking for|find.{0,30}(?:listings|apartments)|search for/i.test(request.text);
     // A new intake with open budget and both sets of alternatives can use the existing
     // interpretation call. The same evidence rules apply to both parser and model.
@@ -769,7 +789,7 @@ export const processWidgetRequest = async (
             "workflow.visitorNameSourceRequestId": result.state.values.name.requestId } : {}) } });
       return result;
     };
-    if (assistant.conversationStrategy === "real_estate" && !assistedIntake &&
+    if (assistant.conversationStrategy === "real_estate" && !assistedIntake && !mixedContact &&
         (!(requestedFacts.length || weekendViewing) || explicitSearch || businessTurn.injection || businessTurn.handoff)) {
       let result = await runBusinessTurn(businessTurn);
       if (!result.text && !currentDates.length && currentMinute === undefined && !businessTurn.topicChange) {
@@ -850,7 +870,8 @@ export const processWidgetRequest = async (
       undefined, { selectedListingId: null, proposedStartAt: null, pendingQuestion: "none" });
       return;
     }
-    if (weekendViewing && propertyListing && !combinedCancellation && !businessTurn.injection) {
+    if (weekendViewing && propertyListing && !combinedCancellation && !businessTurn.injection &&
+        !(experimentalIntents && !activeWorkflow && (requestedFacts.length || requestedContactFields(request.text).length))) {
       const zone = organization?.timeZone ?? "UTC";
       const at = new Date(request.createdAt);
       const plan = flexibleDatePlan(request.text, zone, at);
@@ -1297,6 +1318,7 @@ export const processWidgetRequest = async (
       !asksForPropertyViewing(request.text) && !requestedFacts.length && !requestedContactFields(request.text).length;
     if (experimentalIntents && routeComparison && !activeWorkflow && storedIds.length === 2 &&
         previousListings.length === 2 && previousListings[0]?.currency === previousListings[1]?.currency &&
+        previousListings[0]?.listingType && previousListings[0]?.listingType === previousListings[1]?.listingType &&
         standaloneListingComparison(request.text)) {
       selectedAction = "reuse_listings";
       fallbackReason = "verified_standalone_comparison";
@@ -1304,6 +1326,23 @@ export const processWidgetRequest = async (
       await finalizeControlRequest(requestId, formatListingReply(previousListings, { locale: currentLocale,
         query: request.text, responseLength: assistant.responseLength ?? "short", reused: true }), undefined, undefined, true);
       return;
+    }
+    const intentContext = { organizationId: request.organizationId, assistantId: request.assistantId,
+      conversationId: request.conversationId, visitorId: request.visitorId, locale: currentLocale };
+    if (experimentalIntents && !activeWorkflow && !businessTurn.injection) {
+      if (propertyListing && standalonePropertyQuestion(request.text) && requestedFacts.length) {
+        selectedAction = "property_facts";
+        diagnostic();
+        await finalizeControlRequest(requestId, propertyFactReply(propertyListing, requestedFacts, currentLocale),
+          undefined, { propertyFocusId: propertyListing._id }, true);
+        return;
+      }
+      if (standaloneContactQuestion(request.text)) {
+        selectedAction = "get_business_knowledge";
+        diagnostic();
+        await finalizeControlRequest(requestId, await scopedContactReply(intentContext, request.text), undefined, undefined, true);
+        return;
+      }
     }
     const focusIndex = storedIds.indexOf(String(workflow?.propertyFocusId ?? workflow?.selectedListingId ?? ""));
     const decisionState = {
@@ -1364,13 +1403,27 @@ export const processWidgetRequest = async (
       reservedMicros: reservation }, "AI model budget admitted");
     await recordCustomerMessage(claimed);
     modelCalls++;
+    structuredCall = Boolean(interpretIntent);
     const answer = interpretIntent ? await interpretIntent(inferenceInstructions, history)
       : await respond(fullInstructions, history, realEstateDecision);
     if (interpretIntent) {
-      const advice = answer.action ? null : parseIntentAdvice(answer.text, request.text, storedIds.length, Boolean(propertyListing));
-      answer.action = undefined;
-      answer.text = intentClarification(advice, request.text, currentLocale);
-      synthesisOutcome = advice ? "structured_intent_advisory" : "structured_intent_invalid";
+      const advice = answer.action ? null : parseIntentAdvice(answer.text, request.text, storedIds.length, Boolean(focus));
+      // Rejected plans contribute no intents or references. The dispatcher then
+      // uses only its current-turn read handlers and cannot stage an action.
+      const result = await dispatchReceptionistIntent(advice ?? { intents: [] }, {
+        text: request.text, context: intentContext,
+        requestId: requestId.toString(), displayed: decisionState.display, focused: focus, resolved: propertyListing,
+        business: workflow?.business, turn: businessTurn, activeWorkflow,
+        viewingRequested: explicitViewing && (Boolean(advice) || !explicitSearch && !businessTurn.handoff),
+        staff: availableStaff, zone: organization?.timeZone ?? "UTC", at: new Date(request.createdAt), duration: configuredDuration,
+      });
+      intentEvidence = advice?.evidenceMatches.map(({ kind, start, end }) => ({ kind, start, end }));
+      selectedAction = advice ? "dispatch_structured_intents" : "dispatch_current_turn_only";
+      synthesisOutcome = advice ? "structured_intent_dispatched" : "structured_intent_invalid";
+      if (!advice) fallbackReason = "rejected_structured_advice";
+      diagnostic(answer);
+      await finalizeSuccess(requestId, { ...answer, action: undefined, ...result }, configuration);
+      return;
     }
     modelAction = answer.action?.name ?? "none";
     selectedAction = modelAction;
@@ -1680,7 +1733,7 @@ export const processWidgetRequest = async (
       await finalizeFailure(
         requestId,
         policy.code,
-        policy.retry && execution.retryProviderFailures !== false,
+        policy.retry && !structuredCall && execution.retryProviderFailures !== false,
         policy.uncertain,
       );
     }

@@ -11,6 +11,13 @@ export const personalityInstructions = (settings: { tone?: string; greetingStyle
   return `Communication: sound like a competent virtual receptionist, not a human employee. Use the visitor's language; fallback language is ${settings.defaultLanguage === "en" ? "English" : "Turkish"}. Tone: ${tones[settings.tone ?? "warm"] ?? tones.warm}. Greet ${settings.greetingStyle === "standard" ? "briefly on the first turn" : "only when it helps"}; do not repeat greetings. ${settings.emojiUsage === "minimal" ? "At most one relevant emoji when natural." : "Do not use emoji."} Avoid raw JSON, internal tool names, database IDs, ISO/UTC timestamps, repetitive offers and unnecessary apologies. Ask one focused question when a required detail is missing. Match the visitor's level of formality.`;
 };
 
+const higherOrdinals = ["üçüncü", "dördüncü", "beşinci", "altıncı", "yedinci", "sekizinci", "dokuzuncu", "onuncu"];
+export const hasHigherListingOrdinal = (text: string) =>
+  higherOrdinals.some((ordinal) => hasOrdinalListing(text.toLocaleLowerCase("tr"), ordinal));
+
+const hasOrdinalListing = (lower: string, ordinal: string) =>
+  new RegExp(`(?:^|\\s)${ordinal} (?:ilan|daire|ev)\\p{L}*(?=\\s|[,.!?]|$)`, "u").test(lower);
+
 export const selectedListingFromText = (text: string, listings: VerifiedListing[]) => {
   if (!listings.length) return undefined;
   const lower = text.toLocaleLowerCase("tr");
@@ -22,7 +29,9 @@ export const selectedListingFromText = (text: string, listings: VerifiedListing[
   if (byTitle.length > 1) return undefined;
   const first = /(?:^|\s)(?:first|1st|ilkini|birincisini|(?:ilk|birinci) (?:daire|ilan)\p{L}*|(?:ilk|birinci) ev(?:in|i|de|den)?)(?=\s|[,.!?]|$)/iu.test(lower);
   const second = /(?:^|\s)(?:second|2nd|ikincisini|ikinci (?:daire|ilan)\p{L}*|ikinci ev(?:in|i|de|den)?)(?=\s|[,.!?]|$)/iu.test(lower);
-  if (first || second) return first && second ? undefined : listings[first ? 0 : 1];
+  const indexes = [first, second, ...higherOrdinals.map((ordinal) => hasOrdinalListing(lower, ordinal))]
+    .flatMap((matched, index) => matched ? [index] : []);
+  if (indexes.length) return indexes.length === 1 ? listings[indexes[0]!] : undefined;
   if (/ucuz olan|cheaper one|cheapest/i.test(lower) &&
       listings.every((item) => Number.isFinite(item.price) && item.currency === listings[0]?.currency)) {
     const cheapest = Math.min(...listings.map((item) => item.price));

@@ -48,6 +48,36 @@ const namedPositions = [/\b(?:ilk|ilkini|birinci|birincisini|first)\b/iu, /\b(?:
   /\b(?:yedinci|seventh)\b/iu, /\b(?:sekizinci|eighth)\b/iu, /\b(?:dokuzuncu|ninth)\b/iu,
   /\b(?:onuncu|tenth)\b/iu];
 
+type IntentPlan = z.infer<typeof intentPlanSchema>;
+const wordCharacter = /[\p{L}\p{M}\p{N}_]/u;
+
+function matchEvidence(item: IntentPlan["intents"][number], currentTurn: string) {
+  const quote = item.evidence;
+  if (!quote.trim()) return null;
+  // Only a Turkish yes/no property question may quote a separating comma as
+  // a question mark. Its words, spacing, accents, and case must still match.
+  const clause = item.kind === "property_fact" && item.mode === "question" &&
+    /\s(?:mı|mi|mu|mü)\?$/u.test(quote) && requestedPropertyFacts(quote).length
+    ? quote.slice(0, -1) + "," : null;
+  let match: { quote: string; span: string; start: number; end: number; kind: "exact" | "clause_separator" } | null = null;
+  for (const span of clause ? [quote, clause] : [quote]) {
+    for (let start = currentTurn.indexOf(span); start !== -1; start = currentTurn.indexOf(span, start + 1)) {
+      const end = start + span.length;
+      const before = currentTurn.slice(0, start);
+      const after = currentTurn.slice(end);
+      if ((wordCharacter.test(span[0]!) && /[\p{L}\p{M}\p{N}_]$/u.test(before)) ||
+          (wordCharacter.test(span.at(-1)!) && /^[\p{L}\p{M}\p{N}_]/u.test(after)) ||
+          (/\p{N}$/u.test(span) && /^[.,+:]\p{N}/u.test(after)) ||
+          (/^\p{N}/u.test(span) && /\p{N}[.,+:]$/u.test(before)) ||
+          (/\p{N}[.,+:]$/u.test(span) && /^\p{N}/u.test(after))) continue;
+      if (span === clause && !/^\s+\p{L}/u.test(after)) continue;
+      if (match) return null;
+      match = { quote, span, start, end, kind: span === quote ? "exact" : "clause_separator" };
+    }
+  }
+  return match;
+}
+
 export function parseIntentAdvice(text: string, currentTurn: string, displayedCount: number, hasFocus: boolean) {
   if (text.length > 9_000) return null;
   let raw: unknown;
@@ -56,22 +86,26 @@ export function parseIntentAdvice(text: string, currentTurn: string, displayedCo
   if (!parsed.success) return null;
   const deferral = isConfirmationDeferral(currentTurn);
   if (deferral && (parsed.data.intents.length !== 1 || parsed.data.intents[0]?.kind !== "confirmation_deferral")) return null;
-  if (parsed.data.intents.some((item) => {
-    if (!item.evidence.trim() || !currentTurn.includes(item.evidence)) return true;
-    if (item.kind === "listing_search" && item.mode !== "request" && item.mode !== "question") return true;
+  const evidenceMatches = [];
+  for (const item of parsed.data.intents) {
+    const match = matchEvidence(item, currentTurn);
+    if (!match) return null;
+    if (item.kind === "listing_search" && item.mode !== "request" && item.mode !== "question") return null;
     if (item.kind === "confirmation_deferral" && (item.mode !== "request" ||
-      !deferral || !isConfirmationDeferral(item.evidence))) return true;
+      !deferral || !isConfirmationDeferral(match.span))) return null;
     const { kind, position } = item.reference;
-    return kind === "position" ? position > displayedCount ||
-        !(namedPositions[position - 1]?.test(item.evidence.toLocaleLowerCase("tr")) || new RegExp(`\\b${position}(?:st|nd|rd|th|\\.)\\s*`, "i").test(item.evidence))
-      : kind === "focused" && !hasFocus;
-  })) return null;
-  return parsed.data;
+    if (kind === "position" && (position > displayedCount ||
+      !(namedPositions[position - 1]?.test(match.span.toLocaleLowerCase("tr")) ||
+        new RegExp(`\\b${position}(?:(?:st|nd|rd|th)\\b|\\.(?=\\s|$))`, "i").test(match.span)))) return null;
+    if (kind === "focused" && !hasFocus) return null;
+    evidenceMatches.push(match);
+  }
+  return { ...parsed.data, evidenceMatches };
 }
 
 // Advice can shape a question. Routing and all data-bearing answers remain in
 // the existing server-validated handlers. Never interpolate model text here.
-export function intentClarification(plan: ReturnType<typeof parseIntentAdvice>, text: string, locale: "tr" | "en") {
+export function intentClarification(plan: IntentPlan | null, text: string, locale: "tr" | "en") {
   const tr = locale === "tr";
   if (plan?.intents.some((item) => item.kind === "property_fact" && item.mode === "question" &&
     item.uncertainty.includes("which_listing")) && requestedPropertyFacts(text).length)
